@@ -13,6 +13,13 @@ if [ ! -f "$DIR/laravel-app/vendor/autoload.php" ]; then
   echo "Missing PHP dependencies: run composer install inside laravel-app." >&2
   exit 1
 fi
+if [ ! -f "$DIR/laravel-app/public/build/manifest.json" ]; then
+  echo "Frontend assets are missing; building them once with npm..." >&2
+  (cd "$DIR/laravel-app" && npm install --no-audit --no-fund && npm run build) || {
+    echo "Build failed. Run npm install && npm run build inside laravel-app." >&2
+    exit 1
+  }
+fi
 cd "$DIR/laravel-app"
 
 echo "=================================================="
