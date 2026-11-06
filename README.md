@@ -40,6 +40,16 @@ chmod +x start.sh
 
 ثم افتح `http://127.0.0.1:8000`.
 
+يشغّل `start.sh` خادم Laravel وعامل طابور (`queue:work`) معاً. الرندر لا يحدث داخل طلب الويب:
+يُعاد الرد فوراً بحالة `queued`، ويتابع عامل الطابور العمل ويعرض تقدّماً حقيقياً في الواجهة.
+
+للتحقق من جاهزية البيئة (Python، FFmpeg، الخط العربي، التخزين، الطابور، المفاتيح):
+
+```bash
+cd laravel-app
+php artisan studio:doctor
+```
+
 ## Hardening before network exposure
 
 الوضع الافتراضي محلي فقط. قبل التعريض خارج `127.0.0.1` استخدم HTTPS واضبط:
@@ -84,6 +94,7 @@ cd ..
 # Python 3.11+ and FFmpeg
 python3 -m venv venv
 ./venv/bin/pip install -r requirements.lock.txt
+cd laravel-app && npm run build && cd ..
 ```
 
 المتحكم يتوقع المحرك في `../venv/bin/python3`. ثبت FFmpeg وتحقق من توفره لـ MoviePy.
@@ -104,6 +115,19 @@ php artisan config:cache
 php artisan route:cache
 php artisan view:cache
 php artisan storage:link
+npm ci && npm run build
+```
+
+الواجهات تستخدم أصول Vite المحلية (Tailwind + الخطوط + الأيقونات)، ولا تعتمد على أي CDN.
+يجب إعادة `npm run build` بعد أي تعديل على الواجهة.
+
+## Maintenance commands
+
+```bash
+php artisan studio:doctor                 # preflight checks
+php artisan reels:recover-stale           # mark interrupted renders as failed
+php artisan reels:prune --days=30         # delete old failed renders and orphan media
+php artisan reels:prune --days=30 --dry-run
 ```
 
 ## Backup and restore
@@ -124,4 +148,13 @@ php artisan storage:link
 
 ## CI and dependency reproducibility
 
-يشغّل GitHub Actions اختبارات Laravel وPython وفحص الصياغة عند كل push وPull Request. التزم بملفات `composer.lock` و`requirements.lock.txt` ولا تستخدم تثبيتاً عائماً في الإنتاج.
+يشغّل GitHub Actions اختبارات Laravel وPython وPint وبناء أصول الواجهة عند كل push وPull Request.
+التزم بملفات `composer.lock` و`requirements.lock.txt` ولا تستخدم تثبيتاً عائماً في الإنتاج.
+
+## Security notes
+
+- المفاتيح في `.env` محلية فقط. دوّرها قبل مشاركة المشروع أو نشره، وانقلها إلى
+  شاشة «إدارة المفاتيح» حيث تُخزَّن مشفّرة بـ`APP_KEY`.
+- `APP_DEBUG=true` و`STUDIO_AUTH_ENABLED=false` مناسبان للتشغيل المحلي فقط.
+- أضيفت رؤوس أمان افتراضية (CSP، `X-Frame-Options`، `nosniff`، Referrer-Policy) عبر
+  `SecurityHeaders`، مع تنقيح مفاتيح `AQ.` في سجلات الرندر.
