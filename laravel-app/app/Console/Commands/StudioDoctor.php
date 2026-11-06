@@ -45,10 +45,11 @@ class StudioDoctor extends Command
         }
 
         $font = trim((string) config('studio.engine.arabic_font', ''));
+        $bundledFont = base_path('../python_engine/fonts/NotoKufiArabic.ttf');
         if ($font !== '') {
             $this->check($rows, 'Arabic font', is_file($font), $font, $failures);
         } else {
-            $rows[] = ['Arabic font', '<fg=yellow>warn</>', 'AIVIDEO_ARABIC_FONT is not set; system font fallback will be used'];
+            $this->check($rows, 'Arabic font', is_file($bundledFont), $bundledFont, $failures);
         }
 
         foreach ([storage_path('app'), storage_path('app/public'), storage_path('app/private')] as $path) {

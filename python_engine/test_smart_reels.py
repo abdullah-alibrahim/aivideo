@@ -232,3 +232,40 @@ class ProgressReportingTest(unittest.TestCase):
 
     def test_missing_progress_path_is_ignored(self):
         engine._report_progress(None, "rendering", 50)
+
+
+class ScenePolishTest(unittest.TestCase):
+    def test_short_durations_are_extended_to_readable_scene_minimums(self):
+        texts = ["hook line", "one two three", "four five six", "seven eight nine"]
+
+        durations = engine.plan_scene_durations(texts, 3)
+
+        self.assertAlmostEqual(sum(durations), 5.0, places=3)
+        self.assertTrue(all(duration >= 1.2 for duration in durations))
+
+    def test_voiceover_planning_preserves_the_requested_duration(self):
+        durations = engine.plan_scene_durations(["one two three four five six", "seven eight"], 8, voiceover=True)
+
+        self.assertAlmostEqual(sum(durations), 8.0, places=3)
+        self.assertGreater(durations[0], durations[1])
+
+    def test_bundled_arabic_font_covers_presentation_forms(self):
+        self.assertTrue(engine._font_supports_arabic(engine.get_arabic_font(48)))
+
+    def test_scene_card_renders_with_kicker_and_progress(self):
+        clip = render_reference_card(
+            {"headline": "اشرب كوب ماء فور الاستيقاظ", "point_1": "", "point_2": "", "point_3": ""},
+            duration=2,
+            handle="@page",
+            language="ar",
+            include_branding=False,
+            include_cta=True,
+            kicker="01 / 03",
+            progress=(2, 4),
+        )
+
+        self.assertEqual(clip.size, (1080, 1920))
+        frame = clip.get_frame(0)
+        self.assertIn(frame.shape[2], (3, 4))
+        # Bottom progress segments must survive the anti-border overlay.
+        self.assertGreater(int(np.asarray(frame[1651:1659, 600:880]).max()), 0)

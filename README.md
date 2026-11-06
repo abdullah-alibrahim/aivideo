@@ -99,13 +99,15 @@ cd laravel-app && npm run build && cd ..
 
 المتحكم يتوقع المحرك في `../venv/bin/python3`. ثبت FFmpeg وتحقق من توفره لـ MoviePy.
 
-للعربية على Linux ثبت خطاً مرخصاً مثل Noto Sans Arabic واضبط:
+المحرك يحمل خط **Noto Kufi Arabic** المرخّص (OFL) داخل `python_engine/fonts/` ويستخدمه افتراضياً،
+لذا لا يحتاج خادم Linux إلى تثبيت خط إضافي. لتغيير الخط:
 
 ```env
+# يجب أن يدعم الخط Arabic Presentation Forms وإلا سيرجع المحرك للخط المضمّن.
 AIVIDEO_ARABIC_FONT=/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf
 ```
 
-يفشل المحرك برسالة واضحة عند غياب خط عربي صالح بدلاً من استخدام خط Pillow الصغير.
+يتحقق المحرك من دعم الخط للعربية قبل استخدامه، ويفشل برسالة واضحة عند غياب أي خط صالح.
 
 ## Production cache
 

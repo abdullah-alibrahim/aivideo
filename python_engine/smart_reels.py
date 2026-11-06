@@ -88,69 +88,96 @@ def fade_audio_edges(clip, fade_in=0.18, fade_out=0.32):
     return clip
 
 
-DEFAULT_FONTS = [
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/System/Library/Fonts/GeezaPro.ttc",
-    "/System/Library/Fonts/SFArabic.ttf",
-    "/Library/Fonts/Arial.ttf"
-]
+FONT_DIRECTORY = Path(__file__).resolve().parent / "fonts"
+BUNDLED_FONT = FONT_DIRECTORY / "NotoKufiArabic.ttf"
 
-ARABIC_FONTS = [
-    os.getenv("AIVIDEO_ARABIC_FONT", ""),
+SYSTEM_FONTS = [
     "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/local/share/fonts/NotoSansArabic-Regular.ttf",
     "/System/Library/Fonts/GeezaPro.ttc",
     "/System/Library/Fonts/SFArabic.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial.ttf",
 ]
 
+
+def _load_font(path, size, weight=None):
+    font = ImageFont.truetype(str(path), size)
+    if weight is not None:
+        try:
+            font.set_variation_by_axes([weight])
+        except Exception:
+            pass
+    return font
+
+
+def _font_supports_arabic(font):
+    """Reject fonts that have no Arabic presentation forms (they render tofu)."""
+    try:
+        missing = np.array(font.getmask("\U0010FFFF"))
+        sample = shape_arabic_word("عادات")
+        return all(
+            not np.array_equal(np.array(font.getmask(character)), missing)
+            for character in sample
+        )
+    except Exception:
+        return False
+
+
 def get_font(size=46, bold=True):
-    preferred = DEFAULT_FONTS if bold else [
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/System/Library/Fonts/GeezaPro.ttc",
-        "/System/Library/Fonts/SFArabic.ttf",
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    ]
-    for f in preferred:
-        if os.path.exists(f):
+    if BUNDLED_FONT.exists():
+        try:
+            return _load_font(BUNDLED_FONT, size, 800 if bold else 500)
+        except Exception:
+            pass
+
+    for font_path in SYSTEM_FONTS:
+        if os.path.exists(font_path):
             try:
-                return ImageFont.truetype(f, size)
+                return ImageFont.truetype(font_path, size)
             except Exception:
                 continue
+
     return ImageFont.load_default()
 
 
 def get_arabic_font(size=46):
-    for font_path in ARABIC_FONTS:
+    configured = os.getenv("AIVIDEO_ARABIC_FONT", "").strip()
+    if configured and os.path.exists(configured):
+        try:
+            font = ImageFont.truetype(configured, size)
+            if _font_supports_arabic(font):
+                return font
+            print("[Font Warning] AIVIDEO_ARABIC_FONT lacks Arabic glyphs; using the bundled font.")
+        except Exception as exc:
+            print(f"[Font Warning] Could not load AIVIDEO_ARABIC_FONT: {exc}")
+
+    if BUNDLED_FONT.exists():
+        try:
+            return _load_font(BUNDLED_FONT, size, 800)
+        except Exception:
+            pass
+
+    for font_path in SYSTEM_FONTS:
         if os.path.exists(font_path):
             try:
-                return ImageFont.truetype(font_path, size)
+                font = ImageFont.truetype(font_path, size)
+                if _font_supports_arabic(font):
+                    return font
             except Exception:
                 continue
+
     raise RuntimeError(
-        "Arabic font not found. Set AIVIDEO_ARABIC_FONT to a licensed Arabic font "
-        "(for example Noto Sans Arabic) before rendering Arabic content."
+        "No Arabic-capable font found. Add a licensed font at python_engine/fonts/NotoKufiArabic.ttf "
+        "or set AIVIDEO_ARABIC_FONT to a font that includes Arabic presentation forms."
     )
 
 
 def get_number_font(size=46, bold=True):
-    number_fonts = [
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/Library/Fonts/Arial.ttf",
-    ]
-    for font_path in number_fonts:
-        if os.path.exists(font_path):
-            try:
-                return ImageFont.truetype(font_path, size)
-            except Exception:
-                continue
-    return get_font(size, bold)
+    return get_font(size, bold=bold)
 
 
 def _build_arabic_presentation_forms():
@@ -414,6 +441,13 @@ def tokenize_styled(text, accent_rgb, default_color=(255, 255, 255)):
     return tokens
 
 
+def _format_handle(handle):
+    value = str(handle or "").strip()
+    if value and not value.startswith("@") and not value.startswith("http"):
+        value = "@" + value
+    return value
+
+
 def _display_word(word, language):
     return shape_arabic_word(word) if contains_arabic(word) else word
 
@@ -562,7 +596,7 @@ def _staged_text_reveal_mask_frame(base_mask, time, feather=18):
     return base_mask * reveal
 
 
-def render_reference_card(package, size=(1080, 1920), duration=6, template="classic", handle="", anti_border=True, language="en", accent_color="#fb7185", font_scale=100, include_branding=True, include_cta=True):
+def render_reference_card(package, size=(1080, 1920), duration=6, template="classic", handle="", anti_border=True, language="en", accent_color="#fb7185", font_scale=100, include_branding=True, include_cta=True, kicker=None, progress=None):
     """
     Renders a text-card overlay with the selected visual template:
     - Floating round profile badge with logo icon
@@ -578,6 +612,7 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
     draw = ImageDraw.Draw(img)
 
     scale = max(0.8, min(1.3, float(font_scale) / 100.0))
+    handle = _format_handle(handle)
     font_handle = get_font(round(26 * scale), bold=False)
     font_head = get_font(round(52 * scale), bold=True)
     font_number_head = get_number_font(round(52 * scale), bold=True)
@@ -588,6 +623,8 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
     font_arabic_point = get_arabic_font(round(38 * scale)) if has_arabic_content else None
     font_footer = get_font(round(24 * scale), bold=True)
     font_arabic_footer = get_arabic_font(round(24 * scale)) if has_arabic_content else None
+    font_kicker = get_font(round(26 * scale), bold=True)
+    font_arabic_kicker = get_arabic_font(round(26 * scale)) if has_arabic_content else None
     head_line_height = round(68 * scale)
     point_line_height = round(54 * scale)
 
@@ -615,6 +652,14 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
     else:
         cur_y = int(height * 0.34)
 
+    # One persistent, low-key handle keeps every scene on-brand.
+    if not include_branding and handle:
+        display_handle = _display_word(handle, language)
+        handle_font = font_arabic_footer if contains_arabic(handle) else font_handle
+        bbox_handle = draw.textbbox((0, 0), display_handle, font=handle_font)
+        hx = (width - (bbox_handle[2] - bbox_handle[0])) // 2
+        draw.text((hx, int(height * 0.18)), display_handle, font=handle_font, fill=(203, 213, 225, 165))
+
     # Determine headline text color per template
     if template == "clean_news":
         text_fill = (15, 23, 42)
@@ -622,10 +667,34 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
         text_fill = (255, 255, 255)
 
     # 2. Main Headline Card
-    headline_tokens = tokenize_styled(package.get("headline", ""), accent_rgb, text_fill)
-    headline_lines = wrap_tokens(headline_tokens, font_head, card_w - 60, draw, language, font_number_head, font_arabic_head)
+    headline_text = str(package.get("headline", ""))
+    headline_tokens = tokenize_styled(headline_text, accent_rgb, text_fill)
+
+    # Scene text must stay readable: shrink until it fits in at most three lines.
+    if progress is not None and headline_text.strip():
+        head_size = round(52 * scale)
+        minimum_head_size = round(38 * scale)
+        while head_size > minimum_head_size:
+            trial_head = get_font(head_size, bold=True)
+            trial_number = get_number_font(head_size, bold=True)
+            trial_arabic = get_arabic_font(head_size) if has_arabic_content else None
+            trial_lines = wrap_tokens(headline_tokens, trial_head, card_w - 70, draw, language, trial_number, trial_arabic)
+            if len(trial_lines) <= 3:
+                break
+            head_size -= 4
+
+        font_head = get_font(head_size, bold=True)
+        font_number_head = get_number_font(head_size, bold=True)
+        font_arabic_head = get_arabic_font(head_size) if has_arabic_content else None
+        head_line_height = round(head_size * 1.32)
+
+    headline_lines = wrap_tokens(headline_tokens, font_head, card_w - 70, draw, language, font_number_head, font_arabic_head)
     head_h = (len(headline_lines) * head_line_height) + round(40 * scale)
-    
+
+    if progress is not None:
+        # Single-idea scenes read better when the card sits near the optical center.
+        cur_y = max(int(height * 0.24), int((height - head_h) * 0.40))
+
     # Template styling
     if template == "clean_news":
         # White bold rectangular card with black text
@@ -638,6 +707,21 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
     else: # Classic dark card with highlight
         draw.rounded_rectangle([margin_x, cur_y, width - margin_x, cur_y + head_h], radius=24, fill=(15, 23, 42, 230), outline=(255, 255, 255, 40), width=2)
         text_fill = (255, 255, 255)
+
+    if head_h > 72:
+        bar_x = width - margin_x - 12 if language == "ar" else margin_x + 6
+        draw.rounded_rectangle([bar_x, cur_y + 18, bar_x + 6, cur_y + head_h - 18], radius=3, fill=accent_rgb + (230,))
+
+    if kicker:
+        kicker_text = _display_word(str(kicker), language)
+        kicker_font = font_arabic_kicker if contains_arabic(str(kicker)) else font_kicker
+        kicker_box = draw.textbbox((0, 0), kicker_text, font=kicker_font)
+        kicker_w = (kicker_box[2] - kicker_box[0]) + 46
+        kicker_h = 46
+        kicker_x = (width - kicker_w) // 2
+        kicker_y = cur_y - kicker_h - 16
+        draw.rounded_rectangle([kicker_x, kicker_y, kicker_x + kicker_w, kicker_y + kicker_h], radius=23, fill=accent_rgb + (38,), outline=accent_rgb + (170,), width=2)
+        draw.text((kicker_x + 23, kicker_y + 9), kicker_text, font=kicker_font, fill=accent_rgb + (255,))
 
     for i, line in enumerate(headline_lines):
         lw = rich_line_width(line, font_head, draw, language, font_number_head, font_arabic_head)
@@ -706,18 +790,6 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
 
         cur_y += p_height + 20
 
-    # Keep the CTA for the closing beat instead of repeating it on every scene.
-    if include_cta:
-        pill_text = "Save this for later." if language == "en" else "احفظه وارجع له وقت الحاجة"
-        display_pill = _display_word(pill_text, language)
-        pill_font = font_arabic_footer if contains_arabic(pill_text) else font_footer
-        bbox_pill = draw.textbbox((0, 0), display_pill, font=pill_font)
-        pill_w = (bbox_pill[2] - bbox_pill[0]) + 40
-        pill_x = (width - pill_w) // 2
-        cur_y += 10
-        draw.rounded_rectangle([pill_x, cur_y, pill_x + pill_w, cur_y + 44], radius=12, fill=(248, 250, 252, 230))
-        draw.text((pill_x + 20, cur_y + 10), display_pill, font=pill_font, fill=(15, 23, 42))
-
     # 5. Anti-Border Warning Template (قوالب ضد تحذير الحدود)
     if anti_border:
         # Subtle semi-transparent guides on borders (safe zones for TikTok/Reels)
@@ -726,21 +798,67 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
         # Bottom safe-zone (280px for sound/like buttons/caption)
         draw.rectangle([0, height - 280, width, height], fill=(0, 0, 0, 30))
 
+    # Scene progress indicator: one segment per scene, filled as the reel advances.
+    if progress is not None:
+        current_scene, total_scenes = progress
+        current_scene = max(1, min(int(current_scene), int(total_scenes)))
+        total_scenes = max(1, int(total_scenes))
+        bar_y = int(height * 0.86)
+        track_left = int(width * 0.18)
+        track_right = width - track_left
+        gap = 8
+        segment_w = (track_right - track_left - gap * (total_scenes - 1)) / total_scenes
+        for index in range(total_scenes):
+            segment_x = track_left + index * (segment_w + gap)
+            active = index >= total_scenes - current_scene if language == "ar" else index < current_scene
+            color = accent_rgb + (255,) if active else (255, 255, 255, 55)
+            draw.rounded_rectangle([segment_x, bar_y, segment_x + segment_w, bar_y + 8], radius=4, fill=color)
+
+    # Keep the CTA for the closing beat instead of repeating it on every scene.
+    if include_cta:
+        pill_text = "Save this for later." if language == "en" else "احفظه وارجع له وقت الحاجة"
+        display_pill = _display_word(pill_text, language)
+        if progress is not None:
+            pill_font = get_arabic_font(round(30 * scale)) if contains_arabic(pill_text) else get_font(round(30 * scale), bold=True)
+            bbox_pill = draw.textbbox((0, 0), display_pill, font=pill_font)
+            pill_w = (bbox_pill[2] - bbox_pill[0]) + 64
+            pill_h = 58
+            pill_x = (width - pill_w) // 2
+            pill_y = int(height * 0.75)
+            draw.rounded_rectangle([pill_x, pill_y, pill_x + pill_w, pill_y + pill_h], radius=29, fill=(248, 250, 252, 235))
+            draw.text((pill_x + 32, pill_y + 10), display_pill, font=pill_font, fill=(15, 23, 42))
+        else:
+            pill_font = font_arabic_footer if contains_arabic(pill_text) else font_footer
+            bbox_pill = draw.textbbox((0, 0), display_pill, font=pill_font)
+            pill_w = (bbox_pill[2] - bbox_pill[0]) + 40
+            pill_x = (width - pill_w) // 2
+            cur_y += 10
+            draw.rounded_rectangle([pill_x, cur_y, pill_x + pill_w, cur_y + 44], radius=12, fill=(248, 250, 252, 230))
+            draw.text((pill_x + 20, cur_y + 10), display_pill, font=pill_font, fill=(15, 23, 42))
+
     img_np = np.array(img)
     return ImageClip(img_np).with_duration(duration) if hasattr(ImageClip, 'with_duration') else ImageClip(img_np).set_duration(duration)
 
 
-def animate_reference_overlay(overlay, duration):
-    """Reveal branding, headline, and point cards in reading order, with a restrained lift."""
+def animate_reference_overlay(overlay, duration, staged=True):
+    """Reveal the card with a restrained lift; short scenes use one quick sweep."""
     width, height = overlay.size
     base_mask = overlay.mask.get_frame(0).astype(np.float32) if overlay.mask is not None else np.ones((height, width), dtype=np.float32)
     feather = max(18, int(height * 0.025))
 
-    mask = VideoClip(
-        frame_function=lambda t: _staged_text_reveal_mask_frame(base_mask, t, feather),
-        is_mask=True,
-        duration=duration,
-    )
+    if staged:
+        mask = VideoClip(
+            frame_function=lambda t: _staged_text_reveal_mask_frame(base_mask, t, feather),
+            is_mask=True,
+            duration=duration,
+        )
+    else:
+        reveal_duration = min(0.55, max(0.25, float(duration) * 0.45))
+        mask = VideoClip(
+            frame_function=lambda t: _vertical_reveal_mask_frame(base_mask, t, 0, height, 0.0, reveal_duration, feather),
+            is_mask=True,
+            duration=duration,
+        )
     animated = overlay.with_mask(mask)
 
     def lift_position(time):
@@ -767,6 +885,22 @@ def apply_scene_transition(overlay, duration, fade_in=0.18, fade_out=0.24):
 
     mask = VideoClip(frame_function=transition_mask, is_mask=True, duration=duration)
     return overlay.with_mask(mask)
+
+
+def build_vignette_overlay(size, duration, strength=0.32):
+    """Soften the frame edges so the text card owns the center of attention."""
+    width, height = size
+    y, x = np.ogrid[:height, :width]
+    nx = (x - width / 2.0) / (width / 2.0)
+    ny = (y - height / 2.0) / (height / 2.0)
+    distance = np.sqrt(nx * nx + ny * ny)
+    alpha = np.clip((distance - 0.55) / 0.45, 0.0, 1.0) * strength
+
+    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+    rgba[..., 3] = (alpha * 255).astype(np.uint8)
+    clip = ImageClip(rgba)
+
+    return clip.with_duration(duration) if hasattr(clip, "with_duration") else clip.set_duration(duration)
 
 
 def build_smoke_overlay(size, duration, seed=17, opacity=0.12):
@@ -898,6 +1032,29 @@ def validate_input_video(filepath):
                 pass
     return None
 
+def plan_scene_durations(texts, requested_duration, voiceover=False):
+    """Give each scene enough screen time to be read comfortably."""
+    texts = [str(text) for text in texts if str(text).strip()]
+    if not texts:
+        return []
+
+    requested = max(1.0, float(requested_duration))
+
+    if voiceover:
+        weights = [max(4, len(text.split())) for text in texts]
+        total = sum(weights) or 1
+        return [requested * weight / total for weight in weights]
+
+    minimum = 1.25
+    reading = [max(3.0, len(text.split()) / 2.8) for text in texts]
+    required = min(60.0, max(requested, minimum * len(texts)))
+    total = sum(reading) or 1
+    durations = [max(minimum, required * weight / total) for weight in reading]
+    factor = required / (sum(durations) or 1)
+
+    return [duration * factor for duration in durations]
+
+
 def build_ultra_reel(args):
     resolution = (1080, 1920) if args.aspect_ratio == "9:16" else ((1080, 1080) if args.aspect_ratio == "1:1" else (1920, 1080))
     progress_file = getattr(args, "progress_file", None)
@@ -979,35 +1136,38 @@ def build_ultra_reel(args):
             voiceover_clip = AudioFileClip(voiceover_path)
             render_duration = max(render_duration, float(voiceover_clip.duration) + 0.35)
 
-        per_dur = render_duration / len(valid_clips)
-        processed = [process_motion_clip(f, per_dur, resolution=resolution, motion=args.camera_motion) for f in valid_clips]
-        concatenated = concatenate_videoclips(processed, method="compose")
-        _report_progress(progress_file, "rendering", 55)
-
         scene_texts = [str(package.get("headline", "")).strip()]
         for index in range(1, 4):
             point = str(package.get(f"point_{index}", "")).strip()
             point = re.sub(r"^\s*\d{1,2}[.)،:-]?\s*", "", point)
             if point:
-                scene_texts.append(f"{index}. {point}")
+                scene_texts.append(point)
         scene_texts = [text for text in scene_texts if text]
         if not scene_texts:
             scene_texts = [str(args.topic).strip()]
 
-        if voiceover_enabled:
-            weights = [max(1, len(text.split())) for text in scene_texts]
-        else:
-            weights = [1.35] + [1.0] * (len(scene_texts) - 1)
-        total_weight = sum(weights) or 1
+        scene_durations = plan_scene_durations(scene_texts, render_duration, voiceover_enabled)
+        render_duration = sum(scene_durations)
+
+        per_dur = render_duration / len(valid_clips)
+        processed = [process_motion_clip(f, per_dur, resolution=resolution, motion=args.camera_motion) for f in valid_clips]
+        concatenated = concatenate_videoclips(processed, method="compose")
+        _report_progress(progress_file, "rendering", 55)
+
+        total_points = max(1, len(scene_texts) - 1)
         elapsed = 0.0
         for index, scene_text in enumerate(scene_texts):
-            scene_duration = render_duration - elapsed if index == len(scene_texts) - 1 else render_duration * weights[index] / total_weight
+            scene_duration = scene_durations[index]
             scene_package = {
                 "headline": scene_text,
                 "point_1": "",
                 "point_2": "",
                 "point_3": "",
             }
+            if index == 0:
+                kicker = "HOOK" if args.language == "en" else "هوك"
+            else:
+                kicker = f"{index:02d} / {total_points:02d}"
             overlay = render_reference_card(
                 package=scene_package,
                 size=resolution,
@@ -1020,8 +1180,10 @@ def build_ultra_reel(args):
                 font_scale=getattr(args, 'font_scale', 100),
                 include_branding=(index == 0),
                 include_cta=(index == len(scene_texts) - 1),
+                kicker=kicker,
+                progress=(index + 1, len(scene_texts)),
             )
-            overlay = animate_reference_overlay(overlay, scene_duration)
+            overlay = animate_reference_overlay(overlay, scene_duration, staged=False)
             transition_profile = {
                 "cinematic": (0.28, 0.36),
                 "clean_news": (0.12, 0.18),
@@ -1053,6 +1215,7 @@ def build_ultra_reel(args):
             build_smoke_overlay(resolution, render_duration, seed=43, opacity=smoke_profile[1]),
         ]
         layers.extend(smoke_overlays)
+        layers.append(build_vignette_overlay(resolution, render_duration))
         layers.extend(overlays)
 
         final_video = CompositeVideoClip(layers)
@@ -1092,10 +1255,11 @@ def build_ultra_reel(args):
         _report_progress(progress_file, "encoding", 82)
         final_video.write_videofile(
             args.output,
-            fps=25,
+            fps=30,
             codec='libx264',
             audio_codec='aac',
-            bitrate='2800k',
+            audio_bitrate='192k',
+            ffmpeg_params=['-crf', '19', '-preset', 'veryfast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p'],
             threads=4,
             logger=None
         )
