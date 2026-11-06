@@ -5,21 +5,15 @@
     $activeId = request('active');
     $activeReel = $activeId ? $reels->firstWhere('id', $activeId) : $reels->first();
     $niches = ['money' => '💰 مال', 'habits' => '☀️ عادات', 'psychology' => '🧠 علم نفس', 'tech' => '⚡ تكنولوجيا', 'business' => '📈 أعمال', 'productivity' => '⚙️ إنتاجية'];
+    $stageLabels = __('studio.stages');
+    $isProcessing = $activeReel && in_array($activeReel->status, ['queued', 'processing'], true);
 @endphp
 <html lang="{{ $isAr ? 'ar' : 'en' }}" dir="{{ $dir }}" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $isAr ? 'ماكينة المحتوى - استوديو تركيب الفيديوهات القصيرة' : 'AI Reels Machine - Short Video Studio' }}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: { extend: { fontFamily: { sans: ['{{ $isAr ? "Cairo" : "Plus Jakarta Sans" }}', 'sans-serif'] } } }
-        }
-    </script>
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
     <style>
         body { font-family: '{{ $isAr ? "Cairo" : "Plus Jakarta Sans" }}', sans-serif; background: #070b12; color: #f1f5f9; min-height: 100vh; }
         .studio-card { background: linear-gradient(180deg, #111827 0%, #0d131f 100%); border: 1px solid rgba(255,255,255,0.08); border-radius: 1.5rem; box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5); }
@@ -48,9 +42,9 @@
 
     <!-- Top Navigation Bar -->
     <header class="bg-[#0b111c] border-b border-slate-800 sticky top-0 z-50 shadow-xl">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between gap-4 py-3">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-18 flex flex-wrap items-center justify-between gap-3 py-3">
             <!-- Logo -->
-            <div class="flex items-center gap-3 flex-shrink-0">
+            <div class="flex items-center gap-3 flex-shrink min-w-0">
                 <div class="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-500/10">
                     <i class="fa-solid fa-play text-amber-400 text-lg"></i>
                 </div>
@@ -59,7 +53,7 @@
                         {{ $isAr ? 'ماكينة المحتوى الأجنبي' : 'AI Content Machine' }}
                         <span class="text-[10px] bg-amber-500/20 text-amber-400 font-bold px-2 py-0.5 rounded-full border border-amber-500/30">Studio</span>
                     </h1>
-                    <p class="text-[11px] text-slate-500 hidden sm:block">{{ $isAr ? 'تجميع فيديوهات قصيرة للجمهور الأجنبي والعربي' : 'Short-form video studio for global audiences' }}</p>
+                    <p class="text-[11px] text-slate-400 hidden sm:block">{{ $isAr ? 'تجميع فيديوهات قصيرة للجمهور الأجنبي والعربي' : 'Short-form video studio for global audiences' }}</p>
                 </div>
             </div>
 
@@ -81,7 +75,7 @@
             </div>
 
             <!-- Actions -->
-            <div class="flex items-center gap-2 sm:gap-3">
+            <div class="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end sm:gap-3">
                 <!-- Lang switch -->
                 <div class="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-800 text-xs font-bold">
                     <a href="{{ route('reels.index', array_merge(['lang' => 'ar'], request()->only(['active','filter_lang','filter_niche']))) }}" class="px-2.5 py-1.5 rounded-lg transition {{ $isAr ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white' }}">العربية</a>
@@ -93,14 +87,14 @@
                     <span>{{ $isAr ? 'ويزارد' : 'Wizard' }}</span>
                 </a>
 
-                <a href="{{ route('settings.provider-keys', ['lang' => $lang]) }}" class="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition flex items-center gap-1.5">
+                <a href="{{ route('settings.provider-keys', ['lang' => $lang]) }}" aria-label="{{ $isAr ? 'إدارة المفاتيح' : 'Manage keys' }}" class="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition flex items-center gap-1.5">
                     <i class="fa-solid fa-key text-amber-400"></i>
-                    <span>{{ $isAr ? 'المفاتيح' : 'Keys' }}</span>
+                    <span class="hidden sm:inline">{{ $isAr ? 'المفاتيح' : 'Keys' }}</span>
                 </a>
 
-                <a href="#studio-generator" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow-lg shadow-amber-500/20 flex items-center gap-1.5">
+                <a href="#studio-generator" aria-label="{{ $isAr ? 'توليد سريع' : 'Fast generate' }}" class="px-3 sm:px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow-lg shadow-amber-500/20 flex items-center gap-1.5">
                     <i class="fa-solid fa-bolt"></i>
-                    <span>{{ $isAr ? 'توليد سريع' : 'Fast Generate' }}</span>
+                    <span class="hidden sm:inline">{{ $isAr ? 'توليد سريع' : 'Fast Generate' }}</span>
                 </a>
             </div>
         </div>
@@ -139,7 +133,7 @@
                     </h2>
 
                     <p class="text-sm text-slate-400 max-w-2xl leading-relaxed">
-                        {{ $isAr ? 'اكتب وصفك وعدّل النص والتصميم. من دون مفاتيح AI يستخدم التطبيق قوالب محلية؛ والتصدير يركّب بطاقات النص على مقطع مصدر أو خلفية محفوظة.' : 'Edit the script and design, then export text cards over a source clip or saved background. AI providers are optional and require your own key.' }}
+                        {{ $isAr ? 'اكتب وصفك وعدّل النص والتصميم. يتطلب التوليد مفتاح Gemini مفعّلاً من شاشة المفاتيح؛ والتصدير يركّب بطاقات النص على مقطع مصدر أو خلفية محفوظة.' : 'Edit the script and design, then export text cards over a source clip or saved background. Content generation requires an active Gemini key.' }}
                     </p>
 
                     <div class="pt-2 flex flex-wrap items-center gap-3">
@@ -255,7 +249,7 @@
                         <span class="bg-slate-900 px-2 py-0.5 rounded">{{ $example['duration'] }} {{ $isAr ? 'ث' : 'sec' }}</span>
                     </div>
                     <div class="rounded-xl bg-slate-950 p-3.5 border border-slate-800 space-y-2">
-                        <span class="text-[11px] text-slate-500 block text-center">@yourpage</span>
+                        <span class="text-[11px] text-slate-400 block text-center">@yourpage</span>
                         <div class="p-2.5 bg-slate-900 rounded-lg text-xs font-black text-white">{{ $example['headline'] }}</div>
                         <div class="text-[11px] text-slate-300 space-y-1.5 {{ $isAr ? 'text-right' : 'text-left' }}">
                             <div><span class="text-amber-400 font-bold">1.</span> “<span class="text-amber-300">{{ $example['point_1'] }}</span>”</div>
@@ -305,8 +299,8 @@
                             </a>
                         </div>
                         @elseif($activeReel)
-                        <span class="text-[11px] font-bold {{ $activeReel->status === 'processing' ? 'text-amber-400' : 'text-rose-400' }}">
-                            {{ $activeReel->status === 'processing' ? 'جاري المعالجة...' : 'فشل التوليد' }}
+                        <span class="text-[11px] font-bold {{ $isProcessing ? 'text-amber-400' : 'text-rose-400' }}">
+                            {{ $isProcessing ? ($isAr ? 'قيد المعالجة...' : 'Processing...') : ($isAr ? 'فشل التوليد' : 'Generation failed') }}
                         </span>
                         @endif
                     </div>
@@ -338,7 +332,7 @@
                     <!-- Progress Bar -->
                     <div class="mt-3 space-y-1">
                         <input type="range" id="videoSeekBar" min="0" max="100" step="0.1" value="0" aria-label="{{ $isAr ? 'موضع الفيديو' : 'Video position' }}" class="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer">
-                        <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+                        <div class="flex justify-between text-[10px] text-slate-400 font-mono">
                             <span id="videoCurrentTime">0:00</span>
                             <span id="videoDuration">0:{{ str_pad(intval($activeReel->duration ?? 10), 2, '0', STR_PAD_LEFT) }}</span>
                         </div>
@@ -364,7 +358,7 @@
                         <h4 class="font-black text-white text-sm leading-snug">{{ $activeReel->title }}</h4>
 
                         @if($activeReel->duration)
-                        <div class="flex items-center gap-3 text-[11px] text-slate-500">
+                        <div class="flex items-center gap-3 text-[11px] text-slate-400">
                             <span><i class="fa-solid fa-clock text-amber-400 mr-1"></i>{{ $activeReel->duration }}s</span>
                             @if($activeReel->niche)<span><i class="fa-solid fa-tag text-slate-600 mr-1"></i>{{ $activeReel->niche }}</span>@endif
                             @if($activeReel->created_at)<span>{{ $activeReel->created_at->diffForHumans() }}</span>@endif
@@ -404,24 +398,43 @@
                         @endif
                     </div>
 
+                    @elseif($isProcessing)
+                    <div class="rounded-2xl bg-amber-950/30 border border-amber-500/30 p-6 space-y-3" id="renderProgressCard">
+                        <h4 class="font-bold text-amber-300 flex items-center gap-2">
+                            <i class="fa-solid fa-gear fa-spin"></i>
+                            <span id="renderStatusTitle">{{ $activeReel->status === 'queued' ? ($stageLabels['queued'] ?? 'Queued') : ($stageLabels['processing'] ?? 'Processing') }}</span>
+                        </h4>
+                        <div class="h-2 rounded-full bg-slate-900 overflow-hidden">
+                            <div id="renderProgressBar" class="h-full bg-amber-500 transition-all duration-500" style="width: {{ (int) ($activeReel->progress ?? 0) }}%"></div>
+                        </div>
+                        <div class="flex items-center justify-between text-[11px] text-amber-200">
+                            <span id="renderStage">{{ $stageLabels[$activeReel->progress_stage ?: 'queued'] ?? ($activeReel->progress_stage ?: 'queued') }}</span>
+                            <span id="renderPercent">{{ (int) ($activeReel->progress ?? 0) }}%</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">{{ $isAr ? 'يتم الرندر في الخلفية؛ ستتحدّث هذه الصفحة تلقائياً عند الانتهاء.' : 'Rendering runs in the background; this page will update automatically when it finishes.' }}</p>
+                    </div>
                     @elseif($activeReel)
                     <div class="rounded-2xl bg-rose-950/40 border border-rose-500/30 p-6 space-y-3">
                         <h4 class="font-bold text-rose-300 flex items-center gap-2">
                             <i class="fa-solid fa-triangle-exclamation"></i>
-                            {{ $activeReel->status === 'processing' ? 'جاري المعالجة...' : 'فشل توليد الفيديو' }}
+                            {{ $isAr ? 'فشل توليد الفيديو' : 'Video generation failed' }}
                         </h4>
                         @if($activeReel->error_message)
                         <pre class="text-[10px] text-rose-200/80 whitespace-pre-wrap break-all max-h-40 overflow-auto bg-black/40 p-3 rounded-lg">{{ Str::limit($activeReel->error_message, 1000) }}</pre>
                         @endif
+                        <a href="{{ route('reels.wizard', ['lang' => $lang]) }}" class="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-xs font-black text-slate-950 transition hover:bg-amber-400">
+                            <i class="fa-solid fa-rotate-right"></i>
+                            {{ $isAr ? 'إعادة المحاولة' : 'Try again' }}
+                        </a>
                     </div>
                     @else
                     <!-- Empty State -->
                     <div class="rounded-2xl bg-slate-900/60 border border-dashed border-slate-700 min-h-[340px] flex flex-col items-center justify-center p-8 text-center text-slate-400">
-                        <div class="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mb-4 text-slate-500 text-2xl">
+                        <div class="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mb-4 text-slate-400 text-2xl">
                             <i class="fa-solid fa-film"></i>
                         </div>
                         <h4 class="font-bold text-white text-base mb-1">{{ $isAr ? 'لا يوجد فيديو بعد' : 'No Video Yet' }}</h4>
-                        <p class="text-xs text-slate-500 max-w-xs">{{ $isAr ? 'استخدم الاستوديو أدناه لإنشاء أول فيديو قصير.' : 'Use the studio below to create your first short video.' }}</p>
+                        <p class="text-xs text-slate-400 max-w-xs">{{ $isAr ? 'استخدم الاستوديو أدناه لإنشاء أول فيديو قصير.' : 'Use the studio below to create your first short video.' }}</p>
                         <a href="#studio-generator" class="mt-4 px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition">
                             {{ $isAr ? 'توليد الآن' : 'Generate Now' }}
                         </a>
@@ -467,7 +480,7 @@
                                 <a href="{{ route('reels.index', ['active' => $r->id]) }}" class="text-xs font-bold text-white hover:text-amber-400 block truncate">
                                     {{ $r->title }}
                                 </a>
-                                <span class="text-[10px] text-slate-500">
+                                <span class="text-[10px] text-slate-400">
                                     {{ $r->duration }}s • {{ strtoupper($r->language ?? 'en') }} • {{ $r->niche ?? 'general' }}
                                 </span>
                             </div>
@@ -626,7 +639,7 @@
                                     <i class="fa-solid fa-shield-halved text-amber-400"></i>
                                     <div>
                                         <span class="text-xs font-bold text-white block">{{ $isAr ? 'هوامش آمنة تقريبية' : 'Approximate safe margins' }}</span>
-                                        <span class="text-[10px] text-slate-500">{{ $isAr ? 'لا تضمن التزام المنصة أو التوصية' : 'No platform or reach guarantee' }}</span>
+                                        <span class="text-[10px] text-slate-400">{{ $isAr ? 'لا تضمن التزام المنصة أو التوصية' : 'No platform or reach guarantee' }}</span>
                                     </div>
                                 </div>
                                 <input type="checkbox" name="anti_border" checked class="w-5 h-5 accent-amber-500 cursor-pointer">
@@ -655,8 +668,8 @@
                                 {{ $isAr ? 'استخدم فيديوهاتك بدلاً من الخلفية المختارة (اختياري)' : 'Use your own video instead of the selected background (optional)' }}
                             </label>
                             <div class="border-2 border-dashed border-slate-700 rounded-xl p-4 text-center hover:border-amber-500/50 transition cursor-pointer" onclick="document.getElementById('videoUpload').click()">
-                                <i class="fa-solid fa-cloud-arrow-up text-slate-500 text-lg mb-1"></i>
-                                <p class="text-xs text-slate-500">{{ $isAr ? 'اضغط لرفع فيديو MP4 أو MOV أو AVI أو WebM — سيتم استخدامه كمصدر' : 'Upload MP4, MOV, AVI, or WebM — your video becomes the source' }}</p>
+                                <i class="fa-solid fa-cloud-arrow-up text-slate-400 text-lg mb-1"></i>
+                                <p class="text-xs text-slate-400">{{ $isAr ? 'اضغط لرفع فيديو MP4 أو MOV أو AVI أو WebM — سيتم استخدامه كمصدر' : 'Upload MP4, MOV, AVI, or WebM — your video becomes the source' }}</p>
                                 <input type="file" id="videoUpload" name="videos[]" multiple accept="video/mp4,video/quicktime,video/x-msvideo,video/webm" class="hidden" onchange="showFileNames(this, 'videoNames'); updateUploadedSourceNotice(this, 'videoSourceNotice')">
                             </div>
                             <div id="videoNames" role="status" aria-live="polite" class="text-[11px] text-amber-400 mt-1 hidden"></div>
@@ -670,8 +683,8 @@
                                 {{ $isAr ? 'موسيقى الخلفية (اختياري - MP3)' : 'Background Music (Optional MP3)' }}
                             </label>
                             <div class="border-2 border-dashed border-slate-700 rounded-xl p-4 text-center hover:border-pink-500/50 transition cursor-pointer" onclick="document.getElementById('musicUpload').click()">
-                                <i class="fa-solid fa-music text-slate-500 text-lg mb-1"></i>
-                                <p class="text-xs text-slate-500">{{ $isAr ? 'ارفع MP3 أو WAV أو M4A تملك حق استخدامه' : 'Upload MP3, WAV, or M4A audio you have rights to use' }}</p>
+                                <i class="fa-solid fa-music text-slate-400 text-lg mb-1"></i>
+                                <p class="text-xs text-slate-400">{{ $isAr ? 'ارفع MP3 أو WAV أو M4A تملك حق استخدامه' : 'Upload MP3, WAV, or M4A audio you have rights to use' }}</p>
                                 <input type="file" id="musicUpload" name="music" accept="audio/mpeg,audio/wav,audio/mp4,.mp3,.wav,.m4a" class="hidden" onchange="showFileNames(this, 'musicName')">
                             </div>
                             <div id="musicName" class="text-[11px] text-pink-400 mt-1 hidden"></div>
@@ -685,7 +698,7 @@
                             </label>
                             <textarea name="gemini_keys" rows="2" placeholder="AIza...&#10;AIza..."
                                 class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs font-mono"></textarea>
-                            <p class="text-[10px] text-slate-500">{{ $isAr ? 'تُستخدم مفاتيح Gemini النشطة المحفوظة تلقائياً؛ يمكنك إضافة مفاتيح مؤقتة لهذه العملية. لإدارة المفاتيح اضغط «المفاتيح» بالأعلى. قد تُحتسب الطلبات لدى المزود.' : 'Saved active Gemini keys are used automatically; you can add one-time keys for this run. Manage saved keys from the Keys button above. Provider usage may incur charges.' }}</p>
+                            <p class="text-[10px] text-slate-400">{{ $isAr ? 'تُستخدم مفاتيح Gemini النشطة المحفوظة تلقائياً؛ يمكنك إضافة مفاتيح مؤقتة لهذه العملية. لإدارة المفاتيح اضغط «المفاتيح» بالأعلى. قد تُحتسب الطلبات لدى المزود.' : 'Saved active Gemini keys are used automatically; you can add one-time keys for this run. Manage saved keys from the Keys button above. Provider usage may incur charges.' }}</p>
                         </div>
 
                         <!-- Submit -->
@@ -717,7 +730,7 @@
                     <div class="feature-box text-center">
                         <i class="fa-solid {{ $f[0] }} {{ $f[1] }} text-lg mb-2 block"></i>
                         <div class="text-xs font-bold text-white">{{ $f[2] }}</div>
-                        <div class="text-[10px] text-slate-500 mt-0.5">{{ $f[3] }}</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">{{ $f[3] }}</div>
                     </div>
                     @endforeach
                 </div>
@@ -1069,6 +1082,34 @@
                 });
             });
         });
+
+        // Poll a queued/processing render and refresh the page when it settles.
+        const pendingReel = @json($isProcessing ? ['url' => route('reels.status', $activeReel)] : null);
+        if (pendingReel) {
+            const stageLabels = @json($stageLabels);
+            const pollRender = async () => {
+                try {
+                    const response = await fetch(pendingReel.url, { headers: { 'Accept': 'application/json' } });
+                    if (response.ok) {
+                        const data = await response.json();
+                        const bar = document.getElementById('renderProgressBar');
+                        const percent = document.getElementById('renderPercent');
+                        const stage = document.getElementById('renderStage');
+                        if (bar) bar.style.width = `${data.progress}%`;
+                        if (percent) percent.textContent = `${data.progress}%`;
+                        if (stage) stage.textContent = stageLabels[data.stage] || data.stage || '';
+                        if (data.status === 'completed' || data.status === 'failed') {
+                            window.location.reload();
+                            return;
+                        }
+                    }
+                } catch (error) {
+                    // Keep polling; a transient network error should not stop the UI.
+                }
+                setTimeout(pollRender, 2000);
+            };
+            setTimeout(pollRender, 1000);
+        }
     </script>
 </body>
 </html>

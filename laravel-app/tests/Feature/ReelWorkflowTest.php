@@ -31,6 +31,16 @@ class ReelWorkflowTest extends TestCase
             ->assertDontSee('Abdullah Al-Ibrahem');
     }
 
+    public function test_security_headers_are_sent_on_html_responses(): void
+    {
+        $this->get(route('reels.index'))
+            ->assertOk()
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertHeader('X-Frame-Options', 'SAMEORIGIN')
+            ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+            ->assertHeader('Content-Security-Policy');
+    }
+
     public function test_studio_auth_protects_sensitive_routes_when_enabled(): void
     {
         config()->set('studio.security.enabled', true);

@@ -1,0 +1,43 @@
+<?php
+
+return [
+    'errors' => [
+        'busy' => 'Another render is already running. Please retry shortly.',
+        'gemini_required' => 'Add an active Gemini API key before generating content. Local generation is disabled.',
+        'gemini_failed' => 'Gemini could not generate the content. Check the active key or try again.',
+        'input_invalid' => 'The source clip could not be read. Try a different file.',
+        'font_missing' => 'The Arabic font is missing on the server. Set AIVIDEO_ARABIC_FONT before rendering.',
+        'render_failed' => 'The video renderer could not complete the job. No partial file was kept; try again.',
+        'invalid_result' => 'The renderer finished without a valid result; the video was not saved.',
+        'engine_missing' => 'The Python engine or renderer script is missing on the server.',
+        'timeout' => 'The render took too long. Shorten the duration or try again.',
+        'queue_failed' => 'The video could not be queued for processing. Please try again.',
+    ],
+    'flash' => [
+        'queued' => 'Video queued for rendering. It will update automatically when ready.',
+        'completed' => 'Video, caption, and hashtags created successfully.',
+    ],
+    'stages' => [
+        'processing' => 'Processing',
+        'queued' => 'Queued',
+        'starting' => 'Starting',
+        'preparing' => 'Preparing inputs',
+        'generating' => 'Generating content',
+        'preparing_video' => 'Preparing clips',
+        'rendering' => 'Building scenes',
+        'encoding' => 'Encoding video',
+        'finalizing' => 'Finalizing',
+        'completed' => 'Completed',
+        'retrying' => 'Retrying',
+        'busy' => 'Busy',
+        'gemini_required' => 'Gemini key required',
+        'gemini_failed' => 'Gemini failed',
+        'input_invalid' => 'Invalid source clip',
+        'font_missing' => 'Arabic font missing',
+        'engine_missing' => 'Engine missing',
+        'timeout' => 'Timed out',
+        'render_failed' => 'Render failed',
+        'invalid_result' => 'Invalid result',
+        'queue_failed' => 'Queue failed',
+    ],
+];

@@ -35,7 +35,7 @@ return new class extends Migration
                 'score',
                 'anti_border_warning',
                 'camera_motion',
-                'scenes_count'
+                'scenes_count',
             ]);
         });
     }

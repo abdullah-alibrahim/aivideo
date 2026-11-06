@@ -2,19 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\GenerateReelVideo;
 use App\Models\ProviderSetting;
 use App\Models\Reel;
-use App\Services\ProviderKeyRing;
 use App\Services\GeminiContentService;
+use App\Services\ProviderKeyRing;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
-use Symfony\Component\Process\Process;
+use Symfony\Component\HttpFoundation\Response;
 
 class ReelController extends Controller
 {
@@ -25,6 +25,7 @@ class ReelController extends Controller
             ? $requestedLanguage
             : (in_array(session('app_locale'), ['ar', 'en'], true) ? session('app_locale') : 'ar');
         session(['app_locale' => $lang]);
+        app()->setLocale($lang);
 
         $query = Reel::orderBy('created_at', 'desc');
 
@@ -59,6 +60,7 @@ class ReelController extends Controller
             ? $requestedLanguage
             : (in_array(session('app_locale'), ['ar', 'en'], true) ? session('app_locale') : 'ar');
         session(['app_locale' => $lang]);
+        app()->setLocale($lang);
 
         $backgrounds = $this->backgroundCatalog();
         $elevenLabsKeys = $this->configuredElevenLabsKeys();
@@ -72,9 +74,6 @@ class ReelController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        set_time_limit(0);
-        ignore_user_abort(true);
-
         $backgrounds = $this->backgroundCatalog();
         $backgroundIds = array_column($backgrounds, 'id');
 
@@ -118,16 +117,15 @@ class ReelController extends Controller
         $language = $validated['language'] ?? (in_array($sessionLanguage, ['ar', 'en'], true) ? $sessionLanguage : 'ar');
         $voiceoverEnabled = $request->boolean('voiceover_enabled');
         $elevenLabsKeys = $this->configuredElevenLabsKeys();
-        if ($voiceoverEnabled && (
-            $elevenLabsKeys === []
-            || ! filled($this->elevenLabsVoiceId($language))
-        )) {
+
+        if ($voiceoverEnabled && ($elevenLabsKeys === [] || ! filled($this->elevenLabsVoiceId($language)))) {
             $message = $language === 'en'
                 ? 'Add an active ElevenLabs key and an English Voice ID in Provider Key Manager to enable narration.'
                 : 'أضف مفتاح ElevenLabs نشطاً وVoice ID عربياً من شاشة إدارة المفاتيح لتفعيل التعليق الصوتي.';
 
             return back()->withErrors(['voiceover_enabled' => $message])->withInput();
         }
+
         $niche = $validated['niche'] ?? 'productivity';
         $targetCountry = $validated['target_country'] ?? 'Global';
         $goal = $validated['goal'] ?? 'followers';
@@ -159,48 +157,9 @@ class ReelController extends Controller
             return back()->withErrors(['gemini_keys' => $message])->withInput();
         }
 
-        // Create initial pending Reel record
-        $reel = Reel::create([
-            'title' => $title,
-            'handle' => $handle,
-            'topic' => $topic,
-            'user_prompt' => $userPrompt,
-            'niche' => $niche,
-            'target_country' => $targetCountry,
-            'goal' => $goal,
-            'language' => $language,
-            'style' => $style,
-            'template' => $template,
-            'format_type' => $formatType,
-            'aspect_ratio' => $aspectRatio,
-            'camera_motion' => $cameraMotion,
-            'anti_border_warning' => $antiBorder,
-            'duration' => $duration,
-            'score' => 95,
-            'status' => 'processing',
-            'progress' => 5,
-            'progress_stage' => 'queued',
-        ]);
-
-        $renderLock = Cache::lock('studio:render:global', (int) config('studio.limits.render_lock_seconds', 900));
-        if (! $renderLock->get()) {
-            $reel->update([
-                'status' => 'failed',
-                'error_message' => 'Another render is already running. Please retry shortly.',
-            ]);
-
-            return redirect()->back()->with('error', 'يوجد تصدير آخر قيد التنفيذ؛ حاول بعد انتهائه.');
-        }
-
-        $reel->update(['progress' => 15, 'progress_stage' => 'preparing_inputs']);
-
-        $baseDir = base_path('../');
-        $pythonBin = $baseDir.'/venv/bin/python3';
-        $scriptPath = $baseDir.'/python_engine/smart_reels.py';
-
+        $localDisk = Storage::disk('local');
         $uploadedVideoPaths = [];
         $storedInputPaths = [];
-        $localDisk = Storage::disk('local');
 
         if ($request->hasFile('videos') && count($request->file('videos')) > 0) {
             foreach ($request->file('videos') as $file) {
@@ -217,259 +176,92 @@ class ReelController extends Controller
             if ($selectedBackground && is_file($selectedBackground['path'])) {
                 $uploadedVideoPaths[] = $selectedBackground['path'];
             } else {
-                // Keep a single deterministic fallback; never concatenate a sample with a stock loop.
-                $sampleSource = $baseDir.'/python_engine/storage/input/sample.mp4';
+                $sampleSource = base_path('../python_engine/storage/input/sample.mp4');
                 if (is_file($sampleSource)) {
                     $uploadedVideoPaths[] = $sampleSource;
                 }
             }
         }
 
-        if (empty($uploadedVideoPaths)) {
-            $renderLock->release();
-            $reel->update([
-                'status' => 'failed',
-                'error_message' => 'No video clip available.',
-            ]);
-
+        if ($uploadedVideoPaths === []) {
             return redirect()->back()->with('error', 'يجب توفر مقطع فيديو للمعالجة.');
         }
 
-        // Optional music
         $musicPath = null;
+        $storedMusicPath = null;
         if ($request->hasFile('music')) {
-            $mPath = $request->file('music')->store('bg_music', 'local');
-            if ($mPath) {
-                $musicPath = $localDisk->path($mPath);
-                $reel->bg_music_path = $mPath;
+            $storedMusicPath = $request->file('music')->store('bg_music', 'local');
+            if ($storedMusicPath) {
+                $musicPath = $localDisk->path($storedMusicPath);
             }
         }
 
-        $outputFilename = 'reel_'.$reel->id.'_'.time().'.mp4';
-        $relativeOutputDir = 'reels';
-        $relativeOutputPath = $relativeOutputDir.'/'.$outputFilename;
-        $absoluteOutputPath = storage_path('app/public/'.$relativeOutputPath);
-
-        if (! file_exists(dirname($absoluteOutputPath))) {
-            mkdir(dirname($absoluteOutputPath), 0755, true);
-        }
-
-        $cmd = [
-            $pythonBin,
-            $scriptPath,
-            '--topic', $topic,
-            '--user-prompt', $userPrompt ?? '',
-            '--output', $absoluteOutputPath,
-            '--duration', (string) $duration,
-            '--language', $language,
-            '--niche', $niche,
-            '--goal', $goal,
-            '--target-country', $targetCountry,
-            '--format-type', $formatType,
-            '--style', $style,
-            '--template', $template,
-            '--handle', $handle,
-            '--aspect-ratio', $aspectRatio,
-            '--camera-motion', $cameraMotion,
-            '--font-scale', (string) $fontScale,
-            '--background-dimming', (string) $backgroundDimming,
-            '--json',
-        ];
-
-        if ($antiBorder) {
-            $cmd[] = '--anti-border';
-        }
-
-        if ($voiceoverEnabled) {
-            $cmd[] = '--voiceover';
-            $cmd[] = '--voiceover-tone';
-            $cmd[] = $validated['voiceover_tone'] ?? 'neutral';
-        }
-
-        $cmd[] = '--input';
-        foreach ($uploadedVideoPaths as $vp) {
-            $cmd[] = $vp;
-        }
-
-        if ($musicPath) {
-            $cmd[] = '--music';
-            $cmd[] = $musicPath;
-        }
-
-        // Custom headline from wizard hook or topic
         $customHeadline = $validated['headline'] ?? $validated['hook_headline'] ?? null;
-        if ($customHeadline) {
-            $cmd[] = '--custom-headline';
-            $cmd[] = $customHeadline;
-        }
-
-        if ($accentColor) {
-            $cmd[] = '--accent-color';
-            $cmd[] = $accentColor;
-        }
-
-        // The wizard currently exposes three editable content lines.
         $customPoints = [];
-        for ($i = 1; $i <= 3; $i++) {
-            $val = $validated['line'.$i] ?? null;
-            if ($val && trim($val) !== '') {
-                $customPoints[] = trim($val);
-            }
-        }
-        if (! empty($customPoints)) {
-            $cmd[] = '--custom-points';
-            foreach ($customPoints as $pt) {
-                $cmd[] = $pt;
+        for ($index = 1; $index <= 3; $index++) {
+            $value = $validated['line'.$index] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                $customPoints[] = trim($value);
             }
         }
 
-        $geminiKeys = array_values(array_unique(array_filter(array_merge(
-            app(ProviderKeyRing::class)->rotatedValues('gemini'),
-            $configuredGeminiKeys,
-            $submittedGeminiKeys,
-        ), static fn ($key): bool => is_string($key) && trim($key) !== '')));
-        $elevenLabsKeys = $voiceoverEnabled
-            ? array_values(array_unique(array_filter(array_merge(
-                app(ProviderKeyRing::class)->rotatedValues('elevenlabs'),
-                [(string) config('services.elevenlabs.api_key', '')],
-            ), static fn ($key): bool => is_string($key) && trim($key) !== '')))
-            : $this->configuredElevenLabsKeys();
-        $voiceIds = [
-            'ar' => $this->elevenLabsVoiceId('ar'),
-            'en' => $this->elevenLabsVoiceId('en'),
-        ];
-
-        $process = new Process(
-            $cmd,
-            $baseDir,
-            [
-                'AIVIDEO_GEMINI_KEYS_JSON' => json_encode($geminiKeys, JSON_THROW_ON_ERROR),
-                'AIVIDEO_ELEVENLABS_KEYS_JSON' => json_encode($elevenLabsKeys, JSON_THROW_ON_ERROR),
-                'GEMINI_API_KEY' => '',
-                'GOOGLE_API_KEY' => '',
-                'ELEVENLABS_API_KEY' => (string) config('services.elevenlabs.api_key', ''),
-                'ELEVENLABS_VOICE_ID_AR' => $voiceIds['ar'],
-                'ELEVENLABS_VOICE_ID_EN' => $voiceIds['en'],
-                'PYTHON_DOTENV_DISABLED' => '1',
-            ],
-        );
-        $process->setTimeout(600);
-        try {
-            $reel->update(['progress' => 35, 'progress_stage' => 'generating_with_gemini']);
-            $process->run();
-        } catch (\Throwable $exception) {
-            $renderLock->release();
-            @unlink($absoluteOutputPath);
-
-            $reel->update([
-                'status' => 'failed',
-                'progress_stage' => 'render_failed',
-                'error_message' => 'The video renderer could not complete the job.',
-                'input_videos' => $storedInputPaths,
-            ]);
-
-            return redirect()->route('reels.index', ['lang' => $language])
-                ->with('error', 'تعذّر إكمال تصدير الفيديو. تحقّق من ملفات المصدر وحاول مرة أخرى.');
-        }
-        $renderLock->release();
-
-        if (! $process->isSuccessful()) {
-            $errorOutput = $process->getErrorOutput() ?: $process->getOutput();
-            foreach (array_filter(array_merge($geminiKeys, $elevenLabsKeys, [config('services.elevenlabs.api_key')])) as $secret) {
-                $errorOutput = str_replace($secret, '[redacted API key]', $errorOutput);
-            }
-            $errorOutput = preg_replace('/\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{20,})\b/i', '[redacted API key]', $errorOutput) ?? $errorOutput;
-
-            logger()->warning('Video render process failed.', [
-                'reel_id' => $reel->id,
-                'exit_code' => $process->getExitCode(),
-                'renderer_output' => Str::limit($errorOutput, 1200),
-            ]);
-
-            $reel->update([
-                'status' => 'failed',
-                'progress_stage' => str_contains($errorOutput, 'Gemini') ? 'gemini_failed' : 'render_failed',
-                'error_message' => 'The video renderer could not complete the job. Details are available in the application log.',
-                'input_videos' => $storedInputPaths,
-            ]);
-
-            @unlink($absoluteOutputPath);
-
-            $userError = str_contains($errorOutput, 'Gemini')
-                ? 'فشل توليد المحتوى عبر Gemini. تحقق من المفتاح أو جرّب مفتاحاً آخر.'
-                : 'تعذّر تصدير الفيديو. لم يتم حفظ نتيجة ناقصة؛ راجع السجل وحاول مرة أخرى.';
-
-            return redirect()->route('reels.index', ['lang' => $language])->with('error', $userError);
-        }
-
-        if (! is_file($absoluteOutputPath) || (filesize($absoluteOutputPath) ?: 0) < 1024) {
-            $reel->update([
-                'status' => 'failed',
-                'error_message' => 'The video renderer finished without producing a usable MP4 file.',
-                'input_videos' => $storedInputPaths,
-            ]);
-
-            @unlink($absoluteOutputPath);
-
-            return redirect()->route('reels.index', ['lang' => $language])
-                ->with('error', 'لم ينتج المحرك ملف فيديو صالحاً. تأكد من سلامة مقطع المصدر وحاول مرة أخرى.');
-        }
-
-        $outputStr = $process->getOutput();
-        $generatedScript = null;
-        $caption = null;
-        $hashtags = null;
-        $score = 95;
-        $markerPosition = strpos($outputStr, '__JSON_OUTPUT__');
-        $jsonPart = $markerPosition === false
-            ? null
-            : substr($outputStr, $markerPosition + strlen('__JSON_OUTPUT__'));
-        $data = is_string($jsonPart) ? json_decode(trim($jsonPart), true) : null;
-
-        if (! is_array($data) || ($data['status'] ?? null) !== 'success') {
-            Storage::disk('public')->delete($relativeOutputPath);
-            $reel->update([
-                'status' => 'failed',
-                'error_message' => 'The video renderer returned an invalid result.',
-                'input_videos' => $storedInputPaths,
-            ]);
-
-            return redirect()->route('reels.index', ['lang' => $language])
-                ->with('error', 'اكتمل الرندر دون نتيجة بيانات صالحة؛ لم يُحفظ الفيديو في المكتبة.');
-        }
-
-        if (isset($data['script'])) {
-            $generatedScript = Str::limit(str_replace('*', '', (string) $data['script']), 10000, '');
-        }
-        $userCaption = trim((string) ($validated['caption'] ?? ''));
-        $userHashtags = trim((string) ($validated['hashtags'] ?? ''));
-        $caption = $userCaption !== '' ? $userCaption : ($data['caption'] ?? null);
-        $hashtags = $userHashtags !== '' ? $userHashtags : ($data['hashtags'] ?? null);
-        $score = max(0, min(100, (int) ($data['score'] ?? 95)));
-
-        $reel->update([
-            'status' => 'completed',
-            'progress' => 100,
-            'progress_stage' => 'completed',
-            'output_video_path' => $relativeOutputPath,
-            'output_video_url' => asset('storage/'.$relativeOutputPath),
-            'generated_script' => $generatedScript,
-            'caption' => $caption,
-            'hashtags' => $hashtags,
-            'content_source' => $data['content_source'] ?? 'gemini',
-            'ai_model' => $data['ai_model'] ?? null,
-            'score' => $score,
-            'duration' => isset($data['duration']) ? max($duration, (float) $data['duration']) : $duration,
+        $reel = Reel::create([
+            'title' => $title,
+            'handle' => $handle,
+            'topic' => $topic,
+            'user_prompt' => $userPrompt,
+            'niche' => $niche,
+            'target_country' => $targetCountry,
+            'goal' => $goal,
+            'language' => $language,
+            'style' => $style,
+            'template' => $template,
+            'format_type' => $formatType,
+            'aspect_ratio' => $aspectRatio,
+            'camera_motion' => $cameraMotion,
+            'anti_border_warning' => $antiBorder,
+            'duration' => $duration,
+            'bg_music_path' => $storedMusicPath,
             'input_videos' => $storedInputPaths,
+            'score' => null,
+            'status' => 'queued',
+            'progress' => 0,
+            'progress_stage' => 'queued',
         ]);
 
-        return redirect()->route('reels.index', ['active' => $reel->id, 'lang' => $language])
-            ->with('success', $language === 'en' ? 'Video, caption, and hashtags created successfully.' : 'تم إنشاء الفيديو والكابشن والهاشتاغات بنجاح.');
-    }
+        $outputRelativePath = 'reels/reel_'.$reel->id.'_'.time().'.mp4';
+        Storage::disk('public')->makeDirectory('reels');
 
-    public function show(Reel $reel)
-    {
-        return response()->json($reel);
+        $options = [
+            'font_scale' => $fontScale,
+            'background_dimming' => $backgroundDimming,
+            'anti_border' => $antiBorder,
+            'voiceover' => $voiceoverEnabled,
+            'voiceover_tone' => $validated['voiceover_tone'] ?? 'neutral',
+            'accent_color' => $accentColor,
+            'custom_headline' => $customHeadline,
+            'custom_points' => $customPoints,
+            'caption' => trim((string) ($validated['caption'] ?? '')),
+            'hashtags' => trim((string) ($validated['hashtags'] ?? '')),
+            'gemini_keys' => $geminiKeys,
+        ];
+
+        try {
+            GenerateReelVideo::dispatch($reel, $uploadedVideoPaths, $musicPath, $options, $outputRelativePath);
+        } catch (\Throwable $exception) {
+            logger()->error('Could not queue the reel render.', ['reel_id' => $reel->id, 'exception' => $exception->getMessage()]);
+            $reel->forceFill([
+                'status' => 'failed',
+                'progress_stage' => 'queue_failed',
+                'error_message' => trans('studio.errors.queue_failed', [], $language),
+            ])->save();
+
+            return redirect()->route('reels.index', ['lang' => $language])
+                ->with('error', trans('studio.errors.queue_failed', [], $language));
+        }
+
+        return redirect()->route('reels.index', ['active' => $reel->id, 'lang' => $language])
+            ->with('success', trans('studio.flash.queued', [], $language));
     }
 
     public function status(Reel $reel): JsonResponse
@@ -481,6 +273,96 @@ class ReelController extends Controller
             'error' => $reel->error_message,
             'ready' => $reel->status === 'completed',
         ]);
+    }
+
+    public function stream(Request $request, Reel $reel): Response
+    {
+        $disk = Storage::disk('public');
+        $relativePath = $reel->output_video_path;
+
+        if (! $relativePath || ! $disk->exists($relativePath)) {
+            abort(404);
+        }
+
+        $path = $disk->path($relativePath);
+        $size = filesize($path);
+        $start = 0;
+        $end = max(0, $size - 1);
+        $status = 200;
+        $range = $request->header('Range');
+
+        if ($range !== null) {
+            if (! preg_match('/^bytes=(\d*)-(\d*)$/D', trim($range), $matches)
+                || ($matches[1] === '' && $matches[2] === '')
+                || $size === 0) {
+                return response('', 416, [
+                    'Content-Range' => sprintf('bytes */%d', $size),
+                    'Accept-Ranges' => 'bytes',
+                ]);
+            }
+
+            if ($matches[1] === '') {
+                $suffixLength = (int) $matches[2];
+                if ($suffixLength === 0) {
+                    return response('', 416, [
+                        'Content-Range' => sprintf('bytes */%d', $size),
+                        'Accept-Ranges' => 'bytes',
+                    ]);
+                }
+
+                $start = max(0, $size - $suffixLength);
+                $end = $size - 1;
+            } else {
+                $start = (int) $matches[1];
+                $end = $matches[2] === '' ? $size - 1 : min((int) $matches[2], $size - 1);
+            }
+
+            if ($start >= $size || $start > $end) {
+                return response('', 416, [
+                    'Content-Range' => sprintf('bytes */%d', $size),
+                    'Accept-Ranges' => 'bytes',
+                ]);
+            }
+
+            $status = 206;
+        }
+
+        $length = $end - $start + 1;
+        $headers = [
+            'Content-Type' => 'video/mp4',
+            'Accept-Ranges' => 'bytes',
+            'Cache-Control' => 'no-cache, private',
+            'Content-Length' => (string) $length,
+        ];
+
+        if ($status === 206) {
+            $headers['Content-Range'] = sprintf('bytes %d-%d/%d', $start, $end, $size);
+        }
+
+        return response()->stream(function () use ($path, $start, $length): void {
+            $file = fopen($path, 'rb');
+            if ($file === false) {
+                return;
+            }
+
+            if ($start > 0) {
+                fseek($file, $start);
+            }
+
+            $remaining = $length;
+            while ($remaining > 0 && ! feof($file)) {
+                $chunk = fread($file, min(8192, $remaining));
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+
+                echo $chunk;
+                $remaining -= strlen($chunk);
+            }
+
+            fclose($file);
+        }, $status, $headers);
+
     }
 
     public function destroy(Reel $reel)
@@ -518,28 +400,12 @@ class ReelController extends Controller
                 'Return JSON with keys badge,title,desc,why,angle,hook,hook_desc. Create one accurate short-video idea.',
                 ['topic' => trim($input['topic'] ?? '') ?: trim($input['prompt'] ?? ''), 'language' => $input['language'] ?? 'en']
             ));
+
             return response()->json(['status' => 'success', 'idea' => $result['data'], 'ai_model' => $result['model']]);
         } catch (\Throwable $exception) {
             return $this->geminiFailure($exception);
         }
-        $language = $input['language'] ?? 'en';
-        $subject = trim($input['topic'] ?? '') ?: trim($input['prompt'] ?? '');
-        $subject = Str::limit($subject !== '' ? $subject : ($language === 'ar' ? 'موضوعك' : 'your topic'), 80, '');
-        $isArabic = $language === 'ar';
-        $idea = [
-            'badge' => $isArabic ? 'قالب اقتراح' : 'Template suggestion',
-            'title' => $isArabic ? '3 خطوات عملية حول '.$subject : '3 Practical Steps for '.$subject,
-            'desc' => $isArabic ? 'حوّل الموضوع الذي أدخلته إلى ثلاث خطوات واضحة يمكن شرحها في فيديو قصير.' : 'Turn your topic into three clear steps that fit a short video.',
-            'why' => $isArabic ? 'الاقتراح مبني على موضوعك، وليس على بيانات بحث أو توقعات انتشار.' : 'This suggestion uses your topic; it is not based on search or reach data.',
-            'angle' => $isArabic ? 'قائمة موجزة: فكرة واحدة ثم ثلاث خطوات قابلة للتخصيص.' : 'A concise list: one idea followed by three steps you can customize.',
-            'hook' => $isArabic ? '3 خطوات بسيطة للبدء في '.$subject : '3 Simple Steps to Get Started with '.$subject,
-            'hook_desc' => $isArabic ? 'عنوان تمهيدي قابل للتعديل؛ راجع دقته قبل النشر.' : 'An editable starter headline; verify its accuracy before publishing.',
-        ];
 
-        return response()->json([
-            'status' => 'success',
-            'idea' => $idea,
-        ]);
     }
 
     public function suggestHook(Request $request): JsonResponse
@@ -553,29 +419,12 @@ class ReelController extends Controller
                 'Return JSON with keys badge,headline,desc. Create one strong but accurate hook for a short video.',
                 ['topic' => trim($input['topic'] ?? ''), 'language' => $input['language'] ?? 'en']
             ));
+
             return response()->json(['status' => 'success', 'hook' => $result['data'], 'ai_model' => $result['model']]);
         } catch (\Throwable $exception) {
             return $this->geminiFailure($exception);
         }
-        $language = $input['language'] ?? 'en';
-        $topic = trim($input['topic'] ?? '') ?: ($language === 'ar' ? 'موضوعك' : 'your topic');
-        $topic = Str::limit($topic, 70, '');
-        $hooks = $language === 'ar'
-            ? [
-                ['badge' => 'عنوان عملي', 'headline' => '3 خطوات بسيطة للبدء في '.$topic, 'desc' => 'عنوان تمهيدي مرتبط بموضوعك؛ عدّله ليتطابق مع محتوى الفيديو.'],
-                ['badge' => 'قائمة قصيرة', 'headline' => '3 نقاط مهمّة عن '.$topic, 'desc' => 'صيغة قائمة موجزة من دون ادعاء نتيجة أو وعد غير متحقق.'],
-                ['badge' => 'سؤال تمهيدي', 'headline' => 'ما الذي يجب معرفته عن '.$topic.'؟', 'desc' => 'سؤال مباشر يفتح الموضوع ويحتاج إلى إجابة دقيقة في الفيديو.'],
-            ]
-            : [
-                ['badge' => 'Practical', 'headline' => '3 Simple Steps to Get Started with '.$topic, 'desc' => 'An editable title tied to your topic; make sure the video delivers on it.'],
-                ['badge' => 'Short list', 'headline' => '3 Things to Know About '.$topic, 'desc' => 'A concise list format without promising an unverified result.'],
-                ['badge' => 'Question', 'headline' => 'What Should You Know About '.$topic.'?', 'desc' => 'A direct question that the video should answer accurately.'],
-            ];
 
-        return response()->json([
-            'status' => 'success',
-            'hook' => $hooks[array_rand($hooks)],
-        ]);
     }
 
     public function refineScript(Request $request): JsonResponse
@@ -592,34 +441,12 @@ class ReelController extends Controller
                 'Return JSON with key lines containing exactly three concise rewritten script lines. Apply the requested action.',
                 ['action' => $input['action'] ?? 'punctuate', 'language' => $input['language'] ?? 'en', 'lines' => [$input['line1'] ?? '', $input['line2'] ?? '', $input['line3'] ?? '']]
             ));
+
             return response()->json(['status' => 'success', 'lines' => array_values($result['data']['lines'] ?? []), 'ai_model' => $result['model']]);
         } catch (\Throwable $exception) {
             return $this->geminiFailure($exception);
         }
-        $action = $input['action'] ?? 'punctuate';
-        $isArabic = ($input['language'] ?? 'en') === 'ar';
-        $defaults = $isArabic
-            ? ['ابدأ بخطوة واحدة واضحة.', 'قسّم الفكرة إلى نقاط قصيرة.', 'اختم بسؤال يساعد المشاهد على التفكير.']
-            : ['Start with one clear step.', 'Break the idea into short points.', 'End with a useful question.'];
-        $lines = [];
 
-        foreach (['line1', 'line2', 'line3'] as $index => $field) {
-            $line = trim($input[$field] ?? '') ?: $defaults[$index];
-            if ($action === 'simple') {
-                $line = trim(str_replace('*', '', $line));
-            } elseif ($action === 'shorten') {
-                $words = preg_split('/\s+/u', $line, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-                $line = implode(' ', array_slice($words, 0, 9));
-            } elseif ($action === 'punctuate' && ! preg_match('/[.!?؟!]$/u', $line)) {
-                $line .= $isArabic ? '!' : '!';
-            }
-            $lines[] = $line;
-        }
-
-        return response()->json([
-            'status' => 'success',
-            'lines' => $lines,
-        ]);
     }
 
     public function expertAdvice(Request $request): JsonResponse
@@ -657,44 +484,11 @@ class ReelController extends Controller
                 'Return JSON with keys name,caption,hashtags. Write one social caption in the requested style and language.',
                 ['style' => $input['style'] ?? 'primary', 'headline' => $input['headline'] ?? '', 'language' => $input['language'] ?? 'en']
             ));
+
             return response()->json(['status' => 'success', 'data' => $result['data'], 'ai_model' => $result['model']]);
         } catch (\Throwable $exception) {
             return $this->geminiFailure($exception);
         }
-        $style = $input['style'] ?? 'primary';
-        $isArabic = ($input['language'] ?? 'en') === 'ar';
-        $headline = trim($input['headline'] ?? '') ?: ($isArabic ? 'فكرة الفيديو' : 'your video idea');
-        $headline = Str::limit($headline, 255, '');
-        $names = $isArabic
-            ? ['primary' => 'الأساسي', 'short' => 'مختصر', 'curiosity' => 'سؤال', 'educational' => 'تعليمي', 'story' => 'تأملي']
-            : ['primary' => 'Primary', 'short' => 'Short', 'curiosity' => 'Question', 'educational' => 'Educational', 'story' => 'Reflective'];
-        $captions = $isArabic
-            ? [
-                'primary' => $headline."\n\nاحفظ هذا الدليل للرجوع إليه. ما الخطوة التي ستبدأ بها؟",
-                'short' => $headline."\n\nاحفظها لوقت لاحق.",
-                'curiosity' => $headline."\n\nما السؤال الذي ترغب أن يجيب عنه هذا الفيديو؟",
-                'educational' => $headline."\n\nابدأ بفكرة واحدة، ثم راجع كل خطوة وتأكد من دقتها قبل تطبيقها.",
-                'story' => $headline."\n\nما التجربة التي مررت بها مع هذا الموضوع؟ شاركها في تعليق.",
-            ]
-            : [
-                'primary' => $headline."\n\nSave this guide for later. Which step will you try first?",
-                'short' => $headline."\n\nSave this for later.",
-                'curiosity' => $headline."\n\nWhat question would you like this video to answer?",
-                'educational' => $headline."\n\nStart with one idea, then review each step and verify it before acting.",
-                'story' => $headline."\n\nWhat has your experience with this topic been? Share it in a comment.",
-            ];
-        $hashtags = $isArabic
-            ? '#نصائح #تعلم #معلومات #ريلز #محتوى'
-            : '#Tips #Learn #HowTo #Reels #Video';
-
-        return response()->json([
-            'status' => 'success',
-            'data' => [
-                'name' => $names[$style],
-                'caption' => $captions[$style],
-                'hashtags' => $hashtags,
-            ],
-        ]);
     }
 
     private function geminiPrompt(string $instruction, array $context): string

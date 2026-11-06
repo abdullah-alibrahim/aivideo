@@ -9,10 +9,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>ماكينة المحتوى - استوديو تركيب الفيديوهات القصيرة</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
 
     <style>
         body {
@@ -182,8 +179,8 @@
 
     <!-- Top Sticky Header -->
     <header class="bg-[#0b111c] border-b border-slate-800 sticky top-0 z-50 shadow-md">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-            <div class="flex items-center gap-3">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-20 flex flex-wrap items-center justify-between gap-3 py-3">
+            <div class="flex items-center gap-2 sm:gap-3 min-w-0">
                 <!-- Hamburger menu that opens side account modal (Image 1) -->
                 <button type="button" onclick="openAccountModal()" class="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300 transition border border-slate-700">
                     <i class="fa-solid fa-bars text-base"></i>
@@ -194,10 +191,10 @@
                 <div class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-sm font-bold">
                     <i class="fa-solid fa-play"></i>
                 </div>
-                <div>
-                    <h1 class="text-base font-black text-white flex items-center gap-2">
+                <div class="min-w-0">
+                    <h1 class="text-sm sm:text-base font-black text-white flex items-center gap-2 whitespace-nowrap">
                         ماكينة المحتوى الأجنبي
-                        <span class="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-bold">محلي</span>
+                        <span class="hidden sm:inline text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-bold">محلي</span>
                     </h1>
                 </div>
             </div>
@@ -219,12 +216,12 @@
                 <button type="button" onclick="goToStep(7)" id="stepTab7" class="step-tab-btn">7 المعاينة والتصدير</button>
             </div>
 
-            <div class="flex items-center gap-3">
-                <a href="{{ route('settings.provider-keys', ['lang' => $lang ?? 'ar']) }}" class="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-[11px] font-bold text-slate-200 transition hover:bg-slate-700">
+            <div class="flex items-center gap-2 sm:gap-3">
+                <a href="{{ route('settings.provider-keys', ['lang' => $lang ?? 'ar']) }}" aria-label="إدارة المفاتيح" class="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-2.5 sm:px-3 py-2 text-[11px] font-bold text-slate-200 transition hover:bg-slate-700">
                     <i class="fa-solid fa-key text-amber-400"></i>
-                    <span>إدارة المفاتيح</span>
+                    <span class="hidden sm:inline">إدارة المفاتيح</span>
                 </a>
-                <div class="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-bold text-amber-400">
+                <div class="hidden sm:flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-bold text-amber-400">
                     <i class="fa-solid fa-coins"></i>
                     <span>تجميع محلي</span>
                 </div>
@@ -249,7 +246,7 @@
             <div id="stepContainer1" class="space-y-6">
                 <div class="studio-card p-6 sm:p-8 space-y-4">
                     <h2 class="text-xl font-black text-white">شو الفيديو اللي بدك تعمله؟</h2>
-                    <p class="text-xs text-slate-400">اكتب وصف الفيديو والموضوع. بمفتاحك يرسل المحرك الطلب إلى مزود AI المختار؛ من دونه ينشئ قالباً محلياً أولياً يعتمد أساساً على الموضوع واللغة، وقد لا يطبق الوصف التفصيلي والسوق والهدف والصيغة بالكامل.</p>
+                    <p class="text-xs text-slate-400">اكتب وصف الفيديو والموضوع. يرسل المحرك الطلب إلى Gemini ويتطلب مفتاحاً مفعّلاً؛ من دون مفتاح صالح يتوقف التوليد ولا يُنشأ نص محلي بديل.</p>
 
                     <textarea id="inputUserPrompt" name="user_prompt" rows="3" required
                         placeholder="مثلاً: فيديو قصير يشرح ثلاث طرق لتنظيم الوقت بأسلوب عملي ومباشر"
@@ -287,7 +284,7 @@
                         <option value="1:1">مربع 1:1</option>
                         <option value="16:9">أفقي 16:9</option>
                     </select>
-                    <p class="text-[10px] leading-relaxed text-slate-500">تتغير أبعاد المعاينة والتصدير معاً؛ محتوى المصدر يُقصّ لملاءمة النسبة.</p>
+                    <p class="text-[10px] leading-relaxed text-slate-400">تتغير أبعاد المعاينة والتصدير معاً؛ محتوى المصدر يُقصّ لملاءمة النسبة.</p>
                 </div>
 
                 <div class="studio-card p-6 sm:p-8 space-y-3">
@@ -359,7 +356,7 @@
                 <div class="space-y-3 pt-2 border-t border-slate-800">
                     <label class="block text-xs font-bold text-slate-300 mb-1">مفاتيح Gemini لهذه العملية (مطلوبة إذا لم تحفظ مفتاحاً)</label>
                     <textarea name="gemini_keys" rows="2" class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono"></textarea>
-                    <p class="text-[10px] leading-relaxed text-slate-500">تُستخدم مفاتيح Gemini النشطة المحفوظة تلقائياً؛ يمكنك إضافة مفاتيح مؤقتة لهذه العملية. لإدارتها اضغط «إدارة المفاتيح» بالأعلى. قد تُحتسب الطلبات لدى المزود.</p>
+                    <p class="text-[10px] leading-relaxed text-slate-400">تُستخدم مفاتيح Gemini النشطة المحفوظة تلقائياً؛ يمكنك إضافة مفاتيح مؤقتة لهذه العملية. لإدارتها اضغط «إدارة المفاتيح» بالأعلى. قد تُحتسب الطلبات لدى المزود.</p>
                 </div>
 
                 <button type="button" onclick="triggerAiIdea()" class="w-full py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base transition shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2">
@@ -591,7 +588,7 @@
 
                             <label class="flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3 text-xs text-slate-300">
                                 <input type="checkbox" name="anti_border" value="1" checked class="mt-0.5 h-4 w-4 accent-amber-500">
-                                <span><strong class="block text-white">مراعاة الهوامش الآمنة (تقريبية)</strong><span class="text-[10px] text-slate-500">إزاحة البطاقات عن حواف الفيديو؛ لا تضمن توافقها مع كل واجهة منصة.</span></span>
+                                <span><strong class="block text-white">مراعاة الهوامش الآمنة (تقريبية)</strong><span class="text-[10px] text-slate-400">إزاحة البطاقات عن حواف الفيديو؛ لا تضمن توافقها مع كل واجهة منصة.</span></span>
                             </label>
 
                             <!-- Page Handle Field -->
@@ -609,7 +606,7 @@
                                 <input type="file" id="wizardMusicUpload" name="music" accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4" onchange="showWizardMusicName(this)" class="w-full text-xs text-slate-300 file:ml-3 file:rounded-lg file:border-0 file:bg-amber-500 file:px-3 file:py-2 file:font-bold file:text-slate-950">
                                 <p id="wizardMusicFileName" role="status" aria-live="polite" class="hidden text-[11px] text-emerald-300"></p>
                                 <audio id="wizardMusicPreview" class="hidden w-full" controls preload="metadata" aria-label="معاينة الملف الصوتي"></audio>
-                                <p class="text-[10px] leading-relaxed text-slate-500">عند وجود تعليق صوتي، تُخفّض الموسيقى تلقائياً لتبقى الكلمات واضحة. ومن دون تعليق أو موسيقى، يحتفظ التصدير بصوت المقطع الأصلي إن وُجد.</p>
+                                <p class="text-[10px] leading-relaxed text-slate-400">عند وجود تعليق صوتي، تُخفّض الموسيقى تلقائياً لتبقى الكلمات واضحة. ومن دون تعليق أو موسيقى، يحتفظ التصدير بصوت المقطع الأصلي إن وُجد.</p>
                             </div>
 
                             <div class="studio-card p-4 space-y-3">
@@ -620,7 +617,7 @@
                                 @if ($errors->has('voiceover_enabled'))
                                     <p class="rounded-lg border border-rose-500/30 bg-rose-950/30 p-2 text-[10px] leading-relaxed text-rose-200" role="alert">{{ $errors->first('voiceover_enabled') }}</p>
                                 @else
-                                    <p class="text-[10px] leading-relaxed text-slate-500">الجاهزية حسب إعدادات الخادم: العربية {{ ($voiceoverAvailable['ar'] ?? false) ? 'جاهزة' : 'تحتاج مفتاح ElevenLabs وVoice ID عربي' }}؛ الإنجليزية {{ ($voiceoverAvailable['en'] ?? false) ? 'جاهزة' : 'تحتاج مفتاح ElevenLabs وVoice ID إنجليزي' }}.</p>
+                                    <p class="text-[10px] leading-relaxed text-slate-400">الجاهزية حسب إعدادات الخادم: العربية {{ ($voiceoverAvailable['ar'] ?? false) ? 'جاهزة' : 'تحتاج مفتاح ElevenLabs وVoice ID عربي' }}؛ الإنجليزية {{ ($voiceoverAvailable['en'] ?? false) ? 'جاهزة' : 'تحتاج مفتاح ElevenLabs وVoice ID إنجليزي' }}.</p>
                                 @endif
                                 <div>
                                     <label for="voiceoverTone" class="mb-1.5 block text-[11px] font-bold text-slate-300">نبرة التعليق</label>
@@ -644,7 +641,7 @@
                                 <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs"><span class="font-bold text-white">01</span><span class="text-slate-400">هوك افتتاحي</span></div>
                                 <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs"><span class="font-bold text-white">02–04</span><span class="text-slate-400">نقطة واحدة في كل مشهد</span></div>
                                 <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs"><span class="font-bold text-white">04</span><span class="text-slate-400">خاتمة وCTA على المشهد الأخير</span></div>
-                                <p class="text-[10px] leading-relaxed text-slate-500">تظهر الفكرة الحالية وحدها بدلاً من إبقاء القائمة كاملة على الشاشة؛ يوزّع التوقيت حسب طول النص والكلام.</p>
+                                <p class="text-[10px] leading-relaxed text-slate-400">تظهر الفكرة الحالية وحدها بدلاً من إبقاء القائمة كاملة على الشاشة؛ يوزّع التوقيت حسب طول النص والكلام.</p>
                             </div>
                         </div>
 
@@ -814,7 +811,7 @@
                                     <span class="block text-[9px] text-slate-400 font-bold">66% — 100%</span><span id="timelineLabel3" class="block truncate text-[10px] text-white">النقطة الثالثة</span>
                                 </button>
                             </div>
-                            <p class="text-[10px] text-slate-500">اضغط على أي بطاقة لمعاينة توقيتها وحركتها قبل التصدير.</p>
+                            <p class="text-[10px] text-slate-400">اضغط على أي بطاقة لمعاينة توقيتها وحركتها قبل التصدير.</p>
                         </div>
                     </div>
 
@@ -848,7 +845,7 @@
                                 <i class="fa-solid fa-film"></i>
                                 <span>صدّر ملف MP4</span>
                             </button>
-                            <p class="text-[11px] text-slate-500 text-center">يُركّب المقطع المرفوع أو المخزّن مع بطاقات النص؛ لا تُنشأ مشاهد فيديو جديدة من الوصف.</p>
+                            <p class="text-[11px] text-slate-400 text-center">يُركّب المقطع المرفوع أو المخزّن مع بطاقات النص؛ لا تُنشأ مشاهد فيديو جديدة من الوصف.</p>
 
                             <div id="renderLoadingPrompt" role="status" aria-live="polite" class="hidden p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-center space-y-2">
                                 <div class="inline-block animate-spin rounded-full h-7 w-7 border-4 border-amber-500 border-t-transparent"></div>
@@ -951,10 +948,10 @@
                         <i class="fa-solid fa-film text-amber-400 text-sm"></i>
                         <div>
                             <span class="font-bold text-white block">مكتبي</span>
-                            <span class="text-[10px] text-slate-500">عرض الفيديوهات المحفوظة وتشغيلها أو تنزيلها</span>
+                            <span class="text-[10px] text-slate-400">عرض الفيديوهات المحفوظة وتشغيلها أو تنزيلها</span>
                         </div>
                     </div>
-                    <i class="fa-solid fa-chevron-left text-slate-500"></i>
+                    <i class="fa-solid fa-chevron-left text-slate-400"></i>
                 </a>
 
                 <div class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition cursor-pointer">
@@ -962,10 +959,10 @@
                         <i class="fa-solid fa-folder-open text-sky-400 text-sm"></i>
                         <div>
                             <span class="font-bold text-white block">مجموعتي</span>
-                            <span class="text-[10px] text-slate-500">ستايلاتك وخلفياتك وموسيقاك وفيديوهاتك المحفوظة</span>
+                            <span class="text-[10px] text-slate-400">ستايلاتك وخلفياتك وموسيقاك وفيديوهاتك المحفوظة</span>
                         </div>
                     </div>
-                    <i class="fa-solid fa-chevron-left text-slate-500"></i>
+                    <i class="fa-solid fa-chevron-left text-slate-400"></i>
                 </div>
 
                 <a href="{{ route('reels.wizard', ['lang' => $lang]) }}" class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition">
@@ -973,10 +970,10 @@
                         <i class="fa-solid fa-plus text-emerald-400 text-sm"></i>
                         <div>
                             <span class="font-bold text-white block">فيديو جديد</span>
-                            <span class="text-[10px] text-slate-500">ابدأ فيديو ثاني من أول خطوة</span>
+                            <span class="text-[10px] text-slate-400">ابدأ فيديو ثاني من أول خطوة</span>
                         </div>
                     </div>
-                    <i class="fa-solid fa-chevron-left text-slate-500"></i>
+                    <i class="fa-solid fa-chevron-left text-slate-400"></i>
                 </a>
 
                 <div class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition cursor-pointer">
@@ -984,10 +981,10 @@
                         <i class="fa-solid fa-image text-purple-400 text-sm"></i>
                         <div>
                             <span class="font-bold text-white block">صور ترند</span>
-                            <span class="text-[10px] text-slate-500">صورة واحدة ملفتة لصفحتك، مع الكابشن</span>
+                            <span class="text-[10px] text-slate-400">صورة واحدة ملفتة لصفحتك، مع الكابشن</span>
                         </div>
                     </div>
-                    <i class="fa-solid fa-chevron-left text-slate-500"></i>
+                    <i class="fa-solid fa-chevron-left text-slate-400"></i>
                 </div>
 
                 <div class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition cursor-pointer">
@@ -995,10 +992,10 @@
                         <i class="fa-solid fa-circle-play text-pink-400 text-sm"></i>
                         <div>
                             <span class="font-bold text-white block">ستوري</span>
-                            <span class="text-[10px] text-slate-500">ستوري لصفحتك بصورة وحدة احترافية، أو غلاف لريلك</span>
+                            <span class="text-[10px] text-slate-400">ستوري لصفحتك بصورة وحدة احترافية، أو غلاف لريلك</span>
                         </div>
                     </div>
-                    <i class="fa-solid fa-chevron-left text-slate-500"></i>
+                    <i class="fa-solid fa-chevron-left text-slate-400"></i>
                 </div>
 
                 <div class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition cursor-pointer">
@@ -1006,10 +1003,10 @@
                         <i class="fa-solid fa-shapes text-yellow-400 text-sm"></i>
                         <div>
                             <span class="font-bold text-white block">شعار وغلاف</span>
-                            <span class="text-[10px] text-slate-500">شعار احترافي باسم صفحتك، وغلاف بنفس الألوان</span>
+                            <span class="text-[10px] text-slate-400">شعار احترافي باسم صفحتك، وغلاف بنفس الألوان</span>
                         </div>
                     </div>
-                    <i class="fa-solid fa-chevron-left text-slate-500"></i>
+                    <i class="fa-solid fa-chevron-left text-slate-400"></i>
                 </div>
 
                 <div class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition cursor-pointer">
@@ -1017,10 +1014,10 @@
                         <i class="fa-solid fa-users text-teal-400 text-sm"></i>
                         <div>
                             <span class="font-bold text-white block">شغل الطلاب ونتائجهم</span>
-                            <span class="text-[10px] text-slate-500">فيديوهات عملها طلاب غيرك، وشارك فيديوهاتك ونتيجتك</span>
+                            <span class="text-[10px] text-slate-400">فيديوهات عملها طلاب غيرك، وشارك فيديوهاتك ونتيجتك</span>
                         </div>
                     </div>
-                    <i class="fa-solid fa-chevron-left text-slate-500"></i>
+                    <i class="fa-solid fa-chevron-left text-slate-400"></i>
                 </div>
 
                 <div class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition cursor-pointer">
@@ -1028,10 +1025,10 @@
                         <i class="fa-solid fa-chart-line text-blue-400 text-sm"></i>
                         <div>
                             <span class="font-bold text-white block">صفحات ناجحة</span>
-                            <span class="text-[10px] text-slate-500">صفحات إنجليزي ناجحة بمجالك: شوف شو بينشروا وخذ الفكرة</span>
+                            <span class="text-[10px] text-slate-400">صفحات إنجليزي ناجحة بمجالك: شوف شو بينشروا وخذ الفكرة</span>
                         </div>
                     </div>
-                    <i class="fa-solid fa-chevron-left text-slate-500"></i>
+                    <i class="fa-solid fa-chevron-left text-slate-400"></i>
                 </div>
             </div>
 
@@ -1649,7 +1646,7 @@
                 ['فتح قائمة مساحة العمل', 'Open workspace menu'],
                 ['القائمة', 'Menu'],
                 ['شو الفيديو اللي بدك تعمله؟', 'What video do you want to make?'],
-                ['اكتب وصف الفيديو والموضوع. بمفتاحك يرسل المحرك الطلب إلى مزود AI المختار؛ من دونه ينشئ قالباً محلياً أولياً يعتمد أساساً على الموضوع واللغة، وقد لا يطبق الوصف التفصيلي والسوق والهدف والصيغة بالكامل.', 'Describe the video topic. With your key, the engine sends the request to the selected AI provider; without one, it creates a local starter template based mainly on the topic and language.'],
+                ['اكتب وصف الفيديو والموضوع. يرسل المحرك الطلب إلى Gemini ويتطلب مفتاحاً مفعّلاً؛ من دون مفتاح صالح يتوقف التوليد ولا يُنشأ نص محلي بديل.', 'Describe the video topic. The engine sends the request to Gemini and requires an active key; without a valid key generation stops and no local fallback is used.'],
                 ['الموضوع أو الفكرة اللي ببالك (اختياري)', 'Topic or idea (optional)'],
                 ['مدة الفيديو', 'Video duration'],
                 ['اختر المدة التي تناسب كمية المعلومات', 'Choose a duration that fits the amount of information'],

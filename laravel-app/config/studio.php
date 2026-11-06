@@ -13,4 +13,10 @@ return [
         'render_lock_seconds' => max(60, (int) env('STUDIO_RENDER_LOCK_SECONDS', 900)),
         'stale_after_minutes' => max(5, (int) env('STUDIO_STALE_AFTER_MINUTES', 30)),
     ],
+    'engine' => [
+        'python_bin' => env('AIVIDEO_PYTHON_BIN'),
+        'script' => env('AIVIDEO_ENGINE_SCRIPT'),
+        'render_timeout_seconds' => max(120, (int) env('STUDIO_RENDER_TIMEOUT_SECONDS', 900)),
+        'arabic_font' => env('AIVIDEO_ARABIC_FONT'),
+    ],
 ];

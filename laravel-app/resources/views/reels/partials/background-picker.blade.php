@@ -9,7 +9,7 @@
             <label class="block text-xs font-bold text-slate-200">
                 {{ $isAr ? 'اختر خلفية متحركة' : 'Choose a motion background' }}
             </label>
-            <p class="mt-1 text-[10px] leading-relaxed text-slate-500">
+            <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
                 {{ $isAr ? 'خلفيات أصلية مولّدة محلياً، صامتة وجاهزة للريلز.' : 'Original locally generated backgrounds, silent and Reels-ready.' }}
             </p>
         </div>
@@ -35,7 +35,7 @@
             </label>
         @endforeach
     </fieldset>
-    <p class="text-[10px] leading-relaxed text-slate-500" data-background-help>
+    <p class="text-[10px] leading-relaxed text-slate-400" data-background-help>
         {{ $isAr ? 'إذا رفعت فيديو خاصاً، سيُستخدم بدلاً من الخلفية المختارة. الصوت يُرفع بشكل منفصل.' : 'If you upload your own video, it replaces the selected background. Audio is uploaded separately.' }}
     </p>
 </div>

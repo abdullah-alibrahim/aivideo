@@ -217,3 +217,18 @@ class VerticalRevealAnimationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressReportingTest(unittest.TestCase):
+    def test_progress_file_contains_stage_and_percentage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "progress.json"
+            engine._report_progress(str(path), "encoding", 82)
+
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8")),
+                {"stage": "encoding", "percent": 82},
+            )
+
+    def test_missing_progress_path_is_ignored(self):
+        engine._report_progress(None, "rendering", 50)

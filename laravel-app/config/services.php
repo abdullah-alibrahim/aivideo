@@ -37,6 +37,9 @@ return [
 
     'gemini' => [
         'keys_json' => env('AIVIDEO_GEMINI_KEYS_JSON', '[]'),
+        'api_key' => env('GEMINI_API_KEY'),
+        'google_api_key' => env('GOOGLE_API_KEY'),
+        'models' => ['gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-3.5-flash'],
     ],
 
     'elevenlabs' => [

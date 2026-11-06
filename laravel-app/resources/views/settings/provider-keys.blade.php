@@ -26,12 +26,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $isAr ? 'إدارة مفاتيح الخدمات' : 'Provider Key Manager' }}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <script>
-        tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: { sans: ['{{ $isAr ? "Cairo" : "Plus Jakarta Sans" }}', 'sans-serif'] } } } };
-    </script>
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
     <style>
         body { font-family: '{{ $isAr ? "Cairo" : "Plus Jakarta Sans" }}', sans-serif; background: #070b12; color: #f1f5f9; min-height: 100vh; }
         .panel { background: linear-gradient(180deg, #111827 0%, #0d131f 100%); border: 1px solid rgba(255,255,255,.08); border-radius: 1.5rem; }
@@ -44,7 +39,7 @@
             <div class="flex h-11 w-11 items-center justify-center rounded-2xl border border-amber-500/40 bg-amber-500/15 text-amber-400"><i class="fa-solid fa-key"></i></div>
             <div>
                 <h1 class="font-black text-white">{{ $isAr ? 'إدارة مفاتيح الخدمات' : 'Provider key manager' }}</h1>
-            <p class="text-[11px] text-slate-500">{{ $isAr ? 'Gemini و ElevenLabs' : 'Gemini and ElevenLabs' }}</p>
+            <p class="text-[11px] text-slate-400">{{ $isAr ? 'Gemini و ElevenLabs' : 'Gemini and ElevenLabs' }}</p>
             </div>
         </div>
         <a href="{{ route('reels.index', ['lang' => $lang]) }}" class="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-bold text-slate-200 transition hover:bg-slate-700">
@@ -87,7 +82,7 @@
                         <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-{{ $meta['accent'] }}-500/10 text-{{ $meta['accent'] }}-300"><i class="fa-solid {{ $meta['icon'] }}"></i></div>
                         <div>
                             <h2 class="font-black text-white">{{ $meta['name'] }}</h2>
-                            <p class="text-[11px] text-slate-500">{{ $providerKeys->count() }} {{ $isAr ? 'محفوظ' : 'saved' }} · {{ $usableCount }} {{ $isAr ? 'جاهز' : 'ready' }}</p>
+                            <p class="text-[11px] text-slate-400">{{ $providerKeys->count() }} {{ $isAr ? 'محفوظ' : 'saved' }} · {{ $usableCount }} {{ $isAr ? 'جاهز' : 'ready' }}</p>
                         </div>
                     </div>
                 </div>
@@ -124,7 +119,7 @@
                                 </div>
                             </div>
 
-                            <div class="mt-2 space-y-1 text-[10px] leading-5 text-slate-500">
+                            <div class="mt-2 space-y-1 text-[10px] leading-5 text-slate-400">
                                 @if($key->last_tested_at)
                                     <p>{{ $isAr ? 'آخر فحص:' : 'Last check:' }} {{ $key->last_tested_at->format('Y-m-d H:i') }}
                                         @if($key->last_success_at) · {{ $isAr ? 'آخر نجاح:' : 'Last success:' }} {{ $key->last_success_at->format('Y-m-d H:i') }} @endif
@@ -169,7 +164,7 @@
                             </div>
                         </article>
                     @empty
-                        <p class="rounded-xl border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">{{ $isAr ? 'لا توجد مفاتيح محفوظة لهذا المزود.' : 'No saved keys for this provider yet.' }}</p>
+                        <p class="rounded-xl border border-dashed border-slate-800 p-4 text-center text-xs text-slate-400">{{ $isAr ? 'لا توجد مفاتيح محفوظة لهذا المزود.' : 'No saved keys for this provider yet.' }}</p>
                     @endforelse
                 </div>
 

@@ -50,7 +50,21 @@ except ImportError:
 
 from dotenv import load_dotenv
 
-load_dotenv()
+if os.getenv("PYTHON_DOTENV_DISABLED") != "1":
+    load_dotenv()
+
+
+def _report_progress(path, stage, percent):
+    """Write render progress atomically so the queue worker can poll it."""
+    if not path:
+        return
+    try:
+        temporary = f"{path}.tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump({"stage": stage, "percent": int(percent)}, handle)
+        os.replace(temporary, path)
+    except OSError:
+        pass
 
 def fade_audio_edges(clip, fade_in=0.18, fade_out=0.32):
     """Apply short, duration-safe fades without changing the clip's timing."""
@@ -886,7 +900,9 @@ def validate_input_video(filepath):
 
 def build_ultra_reel(args):
     resolution = (1080, 1920) if args.aspect_ratio == "9:16" else ((1080, 1080) if args.aspect_ratio == "1:1" else (1920, 1080))
+    progress_file = getattr(args, "progress_file", None)
     print(f"[Engine Ultra] Generating package for topic: '{args.topic}'")
+    _report_progress(progress_file, "generating", 30)
 
     base_package = generate_ai_package(
         topic=args.topic,
@@ -911,9 +927,12 @@ def build_ultra_reel(args):
             "hashtags": base_package.get("hashtags", ""),
             "score": base_package.get("score"),
             "content_source": base_package.get("content_source", "gemini"),
+            "ai_model": base_package.get("ai_model"),
         }
     else:
         package = base_package
+
+    _report_progress(progress_file, "preparing_video", 40)
 
     # Process source videos
     input_errors = []
@@ -963,6 +982,7 @@ def build_ultra_reel(args):
         per_dur = render_duration / len(valid_clips)
         processed = [process_motion_clip(f, per_dur, resolution=resolution, motion=args.camera_motion) for f in valid_clips]
         concatenated = concatenate_videoclips(processed, method="compose")
+        _report_progress(progress_file, "rendering", 55)
 
         scene_texts = [str(package.get("headline", "")).strip()]
         for index in range(1, 4):
@@ -1012,7 +1032,9 @@ def build_ultra_reel(args):
             overlay = overlay.with_start(elapsed) if hasattr(overlay, "with_start") else overlay.set_start(elapsed)
             overlays.append(overlay)
             elapsed += scene_duration
+            _report_progress(progress_file, "rendering", 55 + int(15 * (index + 1) / max(len(scene_texts), 1)))
 
+        _report_progress(progress_file, "encoding", 78)
         layers = [concatenated]
         dim_value = max(0, min(80, int(getattr(args, "background_dimming", 35))))
         if dim_value > 0:
@@ -1067,6 +1089,7 @@ def build_ultra_reel(args):
             final_video = final_video.with_audio(mixed_audio) if hasattr(final_video, 'with_audio') else final_video.set_audio(mixed_audio)
 
         os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+        _report_progress(progress_file, "encoding", 82)
         final_video.write_videofile(
             args.output,
             fps=25,
@@ -1076,6 +1099,7 @@ def build_ultra_reel(args):
             threads=4,
             logger=None
         )
+        _report_progress(progress_file, "finalizing", 96)
     finally:
         clips_to_close = [final_video, concatenated, *overlays, *smoke_overlays, *processed, *auxiliary_audio, voiceover_clip]
         for clip in clips_to_close:
@@ -1101,8 +1125,9 @@ def build_ultra_reel(args):
         "script": package.get("headline", "") + "\n" + package.get("point_1", "") + "\n" + package.get("point_2", "") + "\n" + package.get("point_3", ""),
         "caption": package.get("caption"),
         "hashtags": package.get("hashtags"),
-        "score": package.get("score", 95),
+        "score": package.get("score"),
         "content_source": package.get("content_source", "gemini"),
+        "ai_model": package.get("ai_model"),
         "duration": render_duration,
         "language": args.language,
         "template": args.template,
@@ -1138,6 +1163,7 @@ def main():
     parser.add_argument("--custom-headline", default=None)
     parser.add_argument("--custom-points", nargs="*", default=None)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--progress-file", default=None, help="Write render progress as JSON for the queue worker.")
 
     args = parser.parse_args()
 

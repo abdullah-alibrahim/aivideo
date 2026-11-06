@@ -7,9 +7,7 @@ use RuntimeException;
 
 class GeminiContentService
 {
-    public function __construct(private readonly ProviderKeyRing $keyRing)
-    {
-    }
+    public function __construct(private readonly ProviderKeyRing $keyRing) {}
 
     /** @return array{data: array, model: string} */
     public function generate(string $prompt): array
@@ -19,7 +17,7 @@ class GeminiContentService
         $keys = array_values(array_unique(array_filter(array_merge(
             $this->keyRing->rotatedValues('gemini'),
             $configured,
-            [(string) env('GEMINI_API_KEY', ''), (string) env('GOOGLE_API_KEY', '')],
+            [(string) config('services.gemini.api_key', ''), (string) config('services.gemini.google_api_key', '')],
         ), static fn ($key): bool => is_string($key) && trim($key) !== '')));
 
         if ($keys === []) {
@@ -28,7 +26,7 @@ class GeminiContentService
 
         $lastError = null;
         foreach ($keys as $key) {
-            foreach (['gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-3.5-flash'] as $model) {
+            foreach ((array) config('services.gemini.models', ['gemini-2.5-flash']) as $model) {
                 try {
                     $response = Http::acceptJson()
                         ->connectTimeout(5)
