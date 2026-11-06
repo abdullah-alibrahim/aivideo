@@ -1,0 +1,16 @@
+<?php
+
+return [
+    'security' => [
+        'enabled' => (bool) env('STUDIO_AUTH_ENABLED', false),
+        'username' => env('STUDIO_AUTH_USERNAME', ''),
+        'password' => env('STUDIO_AUTH_PASSWORD', ''),
+    ],
+    'limits' => [
+        'max_video_mb' => (int) env('STUDIO_MAX_VIDEO_MB', 100),
+        'max_music_mb' => (int) env('STUDIO_MAX_MUSIC_MB', 20),
+        'max_concurrent_renders' => max(1, (int) env('STUDIO_MAX_CONCURRENT_RENDERS', 1)),
+        'render_lock_seconds' => max(60, (int) env('STUDIO_RENDER_LOCK_SECONDS', 900)),
+        'stale_after_minutes' => max(5, (int) env('STUDIO_STALE_AFTER_MINUTES', 30)),
+    ],
+];
