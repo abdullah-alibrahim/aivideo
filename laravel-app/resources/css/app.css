@@ -6,3 +6,43 @@
 @theme {
     --font-sans: 'Cairo', 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
 }
+
+.background-filter-pill {
+    flex: 0 0 auto;
+    border: 1px solid rgb(51 65 85);
+    border-radius: 9999px;
+    background: rgb(15 23 42 / 0.8);
+    padding: 0.45rem 0.8rem;
+    color: rgb(203 213 225);
+    font-size: 0.7rem;
+    font-weight: 700;
+    transition: color 160ms ease, border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.background-filter-pill:hover {
+    transform: translateY(-1px);
+    border-color: rgb(251 191 36 / 0.65);
+    color: white;
+}
+
+.background-filter-pill[aria-pressed='true'],
+[data-background-favorites][aria-pressed='true'] {
+    border-color: rgb(251 191 36 / 0.8);
+    background: rgb(245 158 11 / 0.12);
+    color: rgb(253 230 138);
+}
+
+[data-background-option]:focus-within {
+    outline: 2px solid rgb(251 191 36);
+    outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .background-filter-pill {
+        transition: none;
+    }
+
+    .background-filter-pill:hover {
+        transform: none;
+    }
+}

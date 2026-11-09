@@ -4,9 +4,10 @@
     $dir = $isAr ? 'rtl' : 'ltr';
     $activeId = request('active');
     $activeReel = $activeId ? $reels->firstWhere('id', $activeId) : $reels->first();
+    $qualityReport = $activeReel?->quality_report ?? [];
     $niches = ['money' => '💰 مال', 'habits' => '☀️ عادات', 'psychology' => '🧠 علم نفس', 'tech' => '⚡ تكنولوجيا', 'business' => '📈 أعمال', 'productivity' => '⚙️ إنتاجية'];
     $stageLabels = __('studio.stages');
-    $isProcessing = $activeReel && in_array($activeReel->status, ['queued', 'processing'], true);
+    $isProcessing = $activeReel && in_array($activeReel->status, ['queued', 'processing', 'cancellation_requested'], true);
 @endphp
 <html lang="{{ $isAr ? 'ar' : 'en' }}" dir="{{ $dir }}" class="dark">
 <head>
@@ -86,6 +87,10 @@
                     <i class="fa-solid fa-list-check"></i>
                     <span>{{ $isAr ? 'ويزارد' : 'Wizard' }}</span>
                 </a>
+                <a href="{{ route('analytics.dashboard', ['lang' => $lang]) }}" class="hidden md:flex px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 font-bold text-xs border border-sky-500/30 transition items-center gap-1.5">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>{{ $isAr ? 'التحليلات' : 'Analytics' }}</span>
+                </a>
 
                 <a href="{{ route('settings.provider-keys', ['lang' => $lang]) }}" aria-label="{{ $isAr ? 'إدارة المفاتيح' : 'Manage keys' }}" class="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition flex items-center gap-1.5">
                     <i class="fa-solid fa-key text-amber-400"></i>
@@ -114,6 +119,45 @@
             <i class="fa-solid fa-circle-exclamation text-xl flex-shrink-0"></i>
             <div class="font-bold text-sm">{{ session('error') }}</div>
             <details class="mt-1 text-[11px] text-rose-400"><summary class="cursor-pointer">تفاصيل الخطأ</summary><pre class="mt-1 whitespace-pre-wrap text-[10px]">{{ session('error') }}</pre></details>
+        </div>
+        @endif
+
+        <!-- Scenario script preview (one-click generation result) -->
+        @if(session('scenario'))
+        @php $scenario = session('scenario'); @endphp
+        <div class="p-4 sm:p-5 rounded-2xl bg-amber-950/40 border border-amber-500/35 animate-fadeinup">
+            <div class="flex items-center justify-between gap-3 mb-3">
+                <div class="flex items-center gap-2 text-amber-300 font-black text-sm">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    {{ $isAr ? 'السيناريو الذي وُلّد من فكرتك' : 'Scenario generated from your idea' }}
+                </div>
+                @if(! empty($scenario['ai_model']))
+                <span class="text-[10px] font-bold text-slate-400 border border-slate-700 rounded-full px-2 py-0.5">{{ $scenario['ai_model'] }}</span>
+                @endif
+            </div>
+            <div class="space-y-2 text-xs">
+                <div class="rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-2.5">
+                    <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wide">{{ $isAr ? 'الهوك' : 'Hook' }}</span>
+                    <p class="text-white font-bold mt-0.5">{{ $scenario['headline'] }}</p>
+                </div>
+                <ol class="space-y-1.5">
+                    @foreach(($scenario['points'] ?? []) as $scenarioPoint)
+                    <li class="rounded-xl bg-slate-900/70 border border-slate-800 px-3 py-2 flex gap-2 items-start">
+                        <span class="text-amber-400 font-black flex-shrink-0">{{ sprintf('%02d', $loop->iteration) }}</span>
+                        <span class="text-slate-200 leading-relaxed">{{ $scenarioPoint }}</span>
+                    </li>
+                    @endforeach
+                </ol>
+                @if(! empty($scenario['caption']))
+                <div class="rounded-xl bg-slate-900/70 border border-slate-800 px-3 py-2.5">
+                    <span class="text-[10px] font-bold text-emerald-400 uppercase tracking-wide">{{ $isAr ? 'كابشن جاهز للنشر' : 'Ready-to-post caption' }}</span>
+                    <p class="text-slate-200 mt-0.5 leading-relaxed">{{ $scenario['caption'] }}</p>
+                    @if(! empty($scenario['hashtags']))
+                    <p class="text-amber-400 text-[11px] mt-1.5 font-bold">{{ $scenario['hashtags'] }}</p>
+                    @endif
+                </div>
+                @endif
+            </div>
         </div>
         @endif
 
@@ -294,9 +338,19 @@
                             <button type="button" id="toggleFullscreenBtn" onclick="toggleFullscreen()" aria-label="{{ $isAr ? 'ملء الشاشة' : 'Enter fullscreen' }}" title="{{ $isAr ? 'ملء الشاشة' : 'Enter fullscreen' }}" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg border border-slate-700 transition">
                                 <i class="fa-solid fa-expand" id="fullscreenIcon"></i>
                             </button>
+                            @if($activeReel->subtitle_path)
+                            <a href="{{ asset('storage/'.$activeReel->subtitle_path) }}" download="reel_{{ $activeReel->id }}.srt" class="text-xs bg-slate-800 hover:bg-slate-700 text-sky-300 font-bold px-2.5 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1" title="SRT">
+                                <i class="fa-solid fa-closed-captioning"></i> SRT
+                            </a>
+                            @endif
                             <a href="{{ route('reels.stream', $activeReel->id) }}" download="reel_{{ $activeReel->id }}.mp4" class="text-xs bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow">
                                 <i class="fa-solid fa-download"></i> MP4
                             </a>
+                            @if($activeReel->collection)
+                            <a href="{{ route('reels.collections.download', $activeReel->collection_id) }}" class="text-xs bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 font-bold px-2.5 py-1.5 rounded-xl border border-sky-500/25 transition flex items-center gap-1">
+                                <i class="fa-solid fa-file-zipper"></i> ZIP ({{ $activeReel->collection->item_count }})
+                            </a>
+                            @endif
                         </div>
                         @elseif($activeReel)
                         <span class="text-[11px] font-bold {{ $isProcessing ? 'text-amber-400' : 'text-rose-400' }}">
@@ -310,13 +364,27 @@
                         @if($activeReel->content_source)
                         <span class="rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-sky-300">{{ strtoupper($activeReel->content_source) }}{{ $activeReel->ai_model ? ' · '.$activeReel->ai_model : '' }}</span>
                         @endif
-                        <span class="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1">{{ $activeReel->progress ?? 0 }}% · {{ $activeReel->progress_stage ?: $activeReel->status }}</span>
+                        <span class="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1">{{ $activeReel->progress ?? 0 }}% · {{ $stageLabels[$activeReel->progress_stage ?: $activeReel->status] ?? ($isAr ? 'قيد المعالجة' : 'Processing') }}</span>
                     </div>
+                    @endif
+
+                    @if($activeReel && is_array($qualityReport) && !empty($qualityReport['checks']))
+                    <details class="mb-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                        <summary class="cursor-pointer text-xs font-bold text-slate-200">{{ trans('studio.quality.score', [], $lang) }}: {{ (int) ($qualityReport['readiness_score'] ?? 0) }}/100 · {{ ($qualityReport['status'] ?? 'review') === 'ready' ? trans('studio.quality.ready', [], $lang) : trans('studio.quality.review', [], $lang) }}</summary>
+                        <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                            @foreach($qualityReport['checks'] as $check)
+                            <div class="rounded-lg border border-slate-800 px-3 py-2 text-[10px]">
+                                <span class="font-bold text-slate-200">{{ trans('studio.quality.checks.'.$check['key'], [], $lang) }}</span>
+                                <span class="block mt-1 text-slate-400">{{ trans('studio.quality.details.'.$check['key'].'.'.$check['status'], [], $lang) }}</span>
+                            </div>
+                            @endforeach
+                        </div>
+                    </details>
                     @endif
 
                     @if($activeReel && $activeReel->status === 'completed')
                     <div class="flex justify-center bg-black rounded-2xl border border-slate-800 relative overflow-hidden" id="videoWrapper" data-playing="false">
-                        <video id="studioVideoPlayer" data-native-player aria-label="{{ $isAr ? 'مشغل الفيديو الناتج' : 'Generated video player' }}" tabindex="0" class="reel-player-shadow rounded-2xl w-full max-h-[560px] object-contain bg-black" playsinline webkit-playsinline loop preload="metadata">
+                        <video id="studioVideoPlayer" data-native-player aria-label="{{ $isAr ? 'مشغل الفيديو الناتج' : 'Generated video player' }}"@if($activeReel->thumbnail_path) poster="{{ asset('storage/'.$activeReel->thumbnail_path) }}"@endif tabindex="0" class="reel-player-shadow rounded-2xl w-full max-h-[560px] object-contain bg-black" playsinline webkit-playsinline loop preload="metadata">
                             <source src="{{ route('reels.stream', $activeReel->id) }}" type="video/mp4">
                         </video>
                         <button type="button" id="centerPlayBtn" onclick="togglePlay()" aria-label="{{ $isAr ? 'تشغيل الفيديو' : 'Play video' }}" class="absolute inset-0 m-auto w-16 h-16 rounded-full bg-amber-500 text-slate-950 shadow-2xl shadow-amber-500/40 flex items-center justify-center transition hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white" aria-hidden="false">
@@ -400,10 +468,20 @@
 
                     @elseif($isProcessing)
                     <div class="rounded-2xl bg-amber-950/30 border border-amber-500/30 p-6 space-y-3" id="renderProgressCard">
+                        <div class="flex items-center justify-between gap-3">
                         <h4 class="font-bold text-amber-300 flex items-center gap-2">
-                            <i class="fa-solid fa-gear fa-spin"></i>
-                            <span id="renderStatusTitle">{{ $activeReel->status === 'queued' ? ($stageLabels['queued'] ?? 'Queued') : ($stageLabels['processing'] ?? 'Processing') }}</span>
+                            <i class="fa-solid {{ $activeReel->status === 'cancellation_requested' ? 'fa-ban' : 'fa-gear fa-spin' }}"></i>
+                            <span id="renderStatusTitle">{{ $stageLabels[$activeReel->progress_stage ?: $activeReel->status] ?? ($stageLabels['processing'] ?? 'Processing') }}</span>
                         </h4>
+                        @if($activeReel->status !== 'cancellation_requested')
+                        <form method="POST" action="{{ route('reels.cancel', $activeReel->id) }}">
+                            @csrf
+                            <button type="submit" class="rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-[11px] font-bold text-rose-200 hover:bg-rose-500/20">
+                                <i class="fa-solid fa-stop {{ $isAr ? 'ml-1' : 'mr-1' }}"></i>{{ $isAr ? 'إلغاء الرندر' : 'Cancel render' }}
+                            </button>
+                        </form>
+                        @endif
+                        </div>
                         <div class="h-2 rounded-full bg-slate-900 overflow-hidden">
                             <div id="renderProgressBar" class="h-full bg-amber-500 transition-all duration-500" style="width: {{ (int) ($activeReel->progress ?? 0) }}%"></div>
                         </div>
@@ -411,14 +489,34 @@
                             <span id="renderStage">{{ $stageLabels[$activeReel->progress_stage ?: 'queued'] ?? ($activeReel->progress_stage ?: 'queued') }}</span>
                             <span id="renderPercent">{{ (int) ($activeReel->progress ?? 0) }}%</span>
                         </div>
-                        <p class="text-[11px] text-slate-400">{{ $isAr ? 'يتم الرندر في الخلفية؛ ستتحدّث هذه الصفحة تلقائياً عند الانتهاء.' : 'Rendering runs in the background; this page will update automatically when it finishes.' }}</p>
+                        <p class="text-[11px] text-slate-400">{{ $activeReel->status === 'cancellation_requested' ? ($isAr ? 'جارٍ إيقاف العملية بأمان…' : 'Stopping the process safely…') : ($isAr ? 'يتم الرندر في الخلفية؛ ستتحدّث هذه الصفحة تلقائياً عند الانتهاء.' : 'Rendering runs in the background; this page will update automatically when it finishes.') }}</p>
+                    </div>
+                    @elseif($activeReel && $activeReel->status === 'cancelled')
+                    <div class="rounded-2xl bg-slate-900/60 border border-slate-700 p-6 space-y-3">
+                        <h4 class="font-bold text-slate-200 flex items-center gap-2">
+                            <i class="fa-solid fa-ban text-slate-400"></i>
+                            {{ $isAr ? 'تم إلغاء الرندر' : 'Render cancelled' }}
+                        </h4>
+                        <p class="text-xs text-slate-400">{{ $isAr ? 'لم يتم الاحتفاظ بملف ناقص. يمكنك تعديل الإعدادات وإعادة المحاولة.' : 'No partial file was kept. You can adjust the settings and try again.' }}</p>
+                        <a href="{{ route('reels.wizard', ['lang' => $lang]) }}" class="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-xs font-black text-slate-950 transition hover:bg-amber-400">
+                            <i class="fa-solid fa-rotate-right"></i>
+                            {{ $isAr ? 'إنشاء فيديو جديد' : 'Create another video' }}
+                        </a>
                     </div>
                     @elseif($activeReel)
                     <div class="rounded-2xl bg-rose-950/40 border border-rose-500/30 p-6 space-y-3">
-                        <h4 class="font-bold text-rose-300 flex items-center gap-2">
-                            <i class="fa-solid fa-triangle-exclamation"></i>
-                            {{ $isAr ? 'فشل توليد الفيديو' : 'Video generation failed' }}
-                        </h4>
+                        <div class="flex items-center justify-between gap-3">
+                            <h4 class="font-bold text-rose-300 flex items-center gap-2">
+                                <i class="fa-solid fa-triangle-exclamation"></i>
+                                {{ $isAr ? 'فشل توليد الفيديو' : 'Video generation failed' }}
+                            </h4>
+                            <form method="POST" action="{{ route('reels.retry', $activeReel->id) }}">
+                                @csrf
+                                <button type="submit" class="rounded-lg border border-amber-400/40 bg-amber-500/15 px-3 py-2 text-[11px] font-bold text-amber-200 hover:bg-amber-500/25">
+                                    <i class="fa-solid fa-rotate-right {{ $isAr ? 'ml-1' : 'mr-1' }}"></i>{{ $isAr ? 'إعادة المحاولة' : 'Retry render' }}
+                                </button>
+                            </form>
+                        </div>
                         @if($activeReel->error_message)
                         <pre class="text-[10px] text-rose-200/80 whitespace-pre-wrap break-all max-h-40 overflow-auto bg-black/40 p-3 rounded-lg">{{ Str::limit($activeReel->error_message, 1000) }}</pre>
                         @endif
@@ -473,8 +571,15 @@
                     <div class="space-y-2 max-h-80 overflow-y-auto pr-1">
                         @foreach($reels as $r)
                         <div class="p-3 rounded-xl bg-slate-900 border {{ ($activeReel && $activeReel->id == $r->id) ? 'border-amber-500 bg-amber-500/5' : 'border-slate-800 hover:border-slate-700' }} flex items-center gap-3 transition group">
-                            <!-- Status dot -->
-                            <div class="w-2 h-2 rounded-full flex-shrink-0 {{ $r->status === 'completed' ? 'bg-emerald-400' : ($r->status === 'processing' ? 'bg-amber-400 animate-pulse' : 'bg-rose-400') }}"></div>
+                            <!-- Thumbnail + status dot -->
+                            <div class="relative h-12 w-9 flex-shrink-0">
+                                @if($r->thumbnail_path)
+                                <img src="{{ asset('storage/'.$r->thumbnail_path) }}" alt="" loading="lazy" class="h-12 w-9 rounded-lg object-cover border border-slate-800">
+                                @else
+                                <div class="h-12 w-9 rounded-lg bg-slate-800 border border-slate-700"></div>
+                                @endif
+                                <span class="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-slate-900 {{ $r->status === 'completed' ? 'bg-emerald-400' : ($r->status === 'processing' ? 'bg-amber-400 animate-pulse' : 'bg-rose-400') }}"></span>
+                            </div>
 
                             <div class="truncate flex-1 min-w-0" @if($r->error_message) title="{{ $r->error_message }}" @endif>
                                 <a href="{{ route('reels.index', ['active' => $r->id]) }}" class="text-xs font-bold text-white hover:text-amber-400 block truncate">
@@ -482,6 +587,9 @@
                                 </a>
                                 <span class="text-[10px] text-slate-400">
                                     {{ $r->duration }}s • {{ strtoupper($r->language ?? 'en') }} • {{ $r->niche ?? 'general' }}
+                                    @if($r->collection)
+                                    • {{ $r->collection->type === 'batch' ? ($isAr ? 'دفعة' : 'Batch') : ($isAr ? 'نسخة' : 'Version') }} {{ $r->collection_position }}/{{ $r->collection->item_count }}
+                                    @endif
                                 </span>
                             </div>
                             <div class="flex items-center gap-1.5 flex-shrink-0">
@@ -511,6 +619,91 @@
 
             <!-- RIGHT: Fast Generator Studio -->
             <div class="lg:col-span-7">
+                <!-- SCENARIO: one idea, one click -->
+                <div id="scenarioCard" class="studio-card rounded-3xl p-6 border border-amber-500/30 mb-5 relative overflow-hidden">
+                    <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500"></div>
+                    <div class="flex items-start gap-3 mb-4">
+                        <div class="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                            <i class="fa-solid fa-wand-magic-sparkles text-amber-400"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <h3 class="text-base font-black text-white flex items-center gap-2">
+                                {{ $isAr ? 'السيناريو — فكرة بواحدة كفيديو' : 'Scenario — one idea, one click' }}
+                                <span class="text-[9px] bg-amber-500/20 text-amber-400 font-bold px-1.5 py-0.5 rounded border border-amber-500/30">{{ $isAr ? 'جديد' : 'NEW' }}</span>
+                            </h3>
+                            <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                                {{ $isAr ? 'اكتب فكرتك بشكل عادي وسنحوّلها عبر Gemini إلى سكربت كامل (هوك + ٣ مشاهد + كابشن وهاشتاغ) ونجعل الفيديو في قائمة الرندر تلقائياً.' : 'Write your plain idea and Gemini turns it into a full script (hook + 3 scenes + caption with hashtags), then queues the render automatically.' }}
+                            </p>
+                        </div>
+                    </div>
+                    <form action="{{ route('reels.scenario') }}" method="POST" enctype="multipart/form-data" id="scenarioForm" class="space-y-3" data-scenario-form>
+                        @csrf
+                        <textarea name="idea" id="scenarioIdea" rows="2" required maxlength="1000"
+                            data-pending-text="{{ $isAr ? 'جارٍ توليد السيناريو عبر الذكاء الاصطناعي...' : 'Generating your scenario with AI...' }}"
+                            placeholder="{{ $isAr ? 'اكتب فكرة الفيديو بشكل حرة... مثال: التزم بمشروع واحد لأول 48 ساعة بدون تشتيت — جمهور أمريكي، هوك قوي.' : 'Describe your video idea freely, e.g.: commit to one project for the first 48 hours without distraction — US audience, strong hook.' }}"
+                            class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm"></textarea>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'اللغة' : 'Language' }}</label>
+                                <select name="language" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    <option value="ar">{{ $isAr ? '🇸🇦 عربي' : '🇸🇦 Arabic' }}</option>
+                                    <option value="en">{{ $isAr ? '🌍 إنجليزي' : '🌍 English' }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'القالب' : 'Template' }}</label>
+                                <select name="template" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    <option value="bold_stripe" selected>⚡ Bold Stripe</option>
+                                    <option value="classic">⭐ Classic</option>
+                                    <option value="clean_news">📰 Clean News</option>
+                                    <option value="cinematic">🎬 Cinematic</option>
+                                    <option value="quote_card">❝ Quote Card</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'المدة' : 'Duration' }}</label>
+                                <select name="duration" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    @foreach([5, 10, 15, 20, 30] as $scenarioDuration)
+                                    <option value="{{ $scenarioDuration }}" @selected($scenarioDuration === 10)>{{ $scenarioDuration }}s</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'الهدف' : 'Goal' }}</label>
+                                <select name="goal" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    <option value="followers">👥 {{ $isAr ? 'متابعين' : 'Followers' }}</option>
+                                    <option value="saves">🔖 {{ $isAr ? 'حفظ' : 'Saves' }}</option>
+                                    <option value="shares">↗️ {{ $isAr ? 'مشاركة' : 'Shares' }}</option>
+                                    <option value="comments">💬 {{ $isAr ? 'تعليقات' : 'Comments' }}</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-3">
+                            <label class="flex-1 min-w-[180px]">
+                                <span class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'مقبض البروفايل (اختياري)' : 'Page handle' }}</span>
+                                <input type="text" name="handle" maxlength="100" placeholder="{{ $isAr ? '@حسابك' : '@yourpage' }}"
+                                    class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-[11px]">
+                            </label>
+                            <label class="flex-1 min-w-[180px]">
+                                <span class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'خلفية الفيديو' : 'Background' }}</span>
+                                <select name="bg_preset" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    @foreach($backgrounds as $background)
+                                    <option value="{{ $background['id'] }}" @selected($loop->first)>{{ $background['name'][$isAr ? 'ar' : 'en'] }}</option>
+                                    @endforeach
+                                </select>
+                            </label>
+                        </div>
+                        <button type="submit" id="scenarioSubmitBtn"
+                            class="w-full py-3.5 rounded-xl font-black bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 hover:from-amber-400 hover:to-amber-500 transition shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 text-sm">
+                            <i class="fa-solid fa-bolt"></i>
+                            <span id="scenarioSubmitLabel">{{ $isAr ? 'ولّد السيناريو وابدأ الرندر' : 'Generate scenario & render' }}</span>
+                        </button>
+                        <p class="text-[10px] text-slate-500 text-center">
+                            {{ $isAr ? 'يتطلب مفتاح Gemini مفعّلاً: يُولّد السيناريو أولًا ليعرضه فوق الصفحة، ثم توضع المعالجة في الطابور تلقائياً.' : 'Requires an active Gemini key: the script is generated and shown above the page first, then the render is queued automatically.' }}
+                        </p>
+                    </form>
+                </div>
+
                 <div class="studio-card rounded-3xl p-7 border border-slate-800">
                     <div class="mb-6 pb-5 border-b border-slate-800 flex items-center justify-between">
                         <div>
@@ -548,12 +741,12 @@
                                     {{ $isAr ? 'النيش (Niche)' : 'Niche Selection' }}
                                 </label>
                                 <select name="niche" class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
-                                    <option value="productivity" selected>⚙️ إنتاجية ومهارات عملية</option>
-                                    <option value="money">💰 مال وعادات مالية</option>
-                                    <option value="habits">☀️ عادات وصباح هادئ وتطوير</option>
-                                    <option value="psychology">🧠 علم نفس وتهدئة النقاشات</option>
-                                    <option value="tech">⚡ ذكاء اصطناعي وتكنولوجيا</option>
-                                    <option value="business">📈 ريادة أعمال وتسويق</option>
+                                    <option value="productivity" selected>⚙️ {{ $isAr ? 'إنتاجية ومهارات عملية' : 'Productivity & practical skills' }}</option>
+                                    <option value="money">💰 {{ $isAr ? 'مال وعادات مالية' : 'Money & financial habits' }}</option>
+                                    <option value="habits">☀️ {{ $isAr ? 'عادات وصباح هادئ وتطوير' : 'Habits & calm mornings' }}</option>
+                                    <option value="psychology">🧠 {{ $isAr ? 'علم نفس وتهدئة النقاشات' : 'Psychology & calm communication' }}</option>
+                                    <option value="tech">⚡ {{ $isAr ? 'ذكاء اصطناعي وتكنولوجيا' : 'AI & technology' }}</option>
+                                    <option value="business">📈 {{ $isAr ? 'ريادة أعمال وتسويق' : 'Business & marketing' }}</option>
                                 </select>
                             </div>
                             <div>
@@ -562,10 +755,10 @@
                                     {{ $isAr ? 'هدف الفيديو' : 'Video Goal' }}
                                 </label>
                                 <select name="goal" class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
-                                    <option value="followers">👥 جلب متابعين جدد</option>
-                                    <option value="saves">🔖 حفظ الفيديو (Saves)</option>
-                                    <option value="shares">🚀 مشاركات</option>
-                                    <option value="comments">💬 تعليقات ونقاش</option>
+                                    <option value="followers">👥 {{ $isAr ? 'جلب متابعين جدد' : 'Get new followers' }}</option>
+                                    <option value="saves">🔖 {{ $isAr ? 'حفظ الفيديو' : 'Saves' }}</option>
+                                    <option value="shares">🚀 {{ $isAr ? 'مشاركات' : 'Shares' }}</option>
+                                    <option value="comments">💬 {{ $isAr ? 'تعليقات ونقاش' : 'Comments & discussion' }}</option>
                                 </select>
                             </div>
                         </div>
@@ -578,9 +771,11 @@
                                     {{ $isAr ? 'القالب الاحترافي' : 'Video Template' }}
                                 </label>
                                 <select name="template" class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
-                                    <option value="classic">⭐ Classic (كارت كلاسيكي)</option>
-                                    <option value="clean_news">📰 Clean News (ستايل أخبار)</option>
-                                    <option value="cinematic">🎬 Cinematic Glass (سينمائي شفاف)</option>
+                                    <option value="classic">⭐ {{ $isAr ? 'Classic (كارت كلاسيكي)' : 'Classic card' }}</option>
+                                    <option value="clean_news">📰 {{ $isAr ? 'Clean News (ستايل أخبار)' : 'Clean News' }}</option>
+                                    <option value="cinematic">🎬 {{ $isAr ? 'Cinematic Glass (سينمائي شفاف)' : 'Cinematic Glass' }}</option>
+                                    <option value="quote_card">❝ {{ $isAr ? 'Quote Card (بطاقة اقتباس)' : 'Quote Card' }}</option>
+                                    <option value="bold_stripe">⚡ {{ $isAr ? 'Bold Stripe (شريط جسور)' : 'Bold Stripe' }}</option>
                                 </select>
                             </div>
                             <div>
@@ -605,18 +800,18 @@
                             <div>
                                 <label class="block text-xs font-bold text-slate-300 mb-2">{{ $isAr ? 'المدة' : 'Duration' }}</label>
                                 <select name="duration" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
-                                    <option value="5">5 ث</option>
-                                    <option value="10" selected>10 ث</option>
-                                    <option value="20">20 ث</option>
-                                    <option value="30">30 ث</option>
+                                    <option value="5">5 {{ $isAr ? 'ث' : 's' }}</option>
+                                    <option value="10" selected>10 {{ $isAr ? 'ث' : 's' }}</option>
+                                    <option value="20">20 {{ $isAr ? 'ث' : 's' }}</option>
+                                    <option value="30">30 {{ $isAr ? 'ث' : 's' }}</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-xs font-bold text-slate-300 mb-2">{{ $isAr ? 'حركة الكاميرا' : 'Camera' }}</label>
                                 <select name="camera_motion" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
-                                    <option value="zoom_in">🔍 تقريب هادئ</option>
+                                    <option value="zoom_in">🔍 {{ $isAr ? 'تقريب هادئ' : 'Gentle zoom' }}</option>
                                     <option value="pan">↔️ Pan</option>
-                                    <option value="static">ثابت</option>
+                                    <option value="static">{{ $isAr ? 'ثابت' : 'Static' }}</option>
                                 </select>
                             </div>
                             <div>
@@ -652,9 +847,9 @@
                                     {{ $isAr ? 'نسبة العرض إلى الارتفاع' : 'Aspect Ratio' }}
                                 </label>
                                 <div class="flex gap-2 text-[11px] font-bold">
-                                    <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="aspect_ratio" value="9:16" checked class="accent-amber-500"> 9:16 ريلز</label>
-                                    <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="aspect_ratio" value="1:1" class="accent-amber-500"> 1:1 سكوير</label>
-                                    <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="aspect_ratio" value="16:9" class="accent-amber-500"> 16:9 أفقي</label>
+                                    <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="aspect_ratio" value="9:16" checked class="accent-amber-500"> 9:16 {{ $isAr ? 'ريلز' : 'Reels' }}</label>
+                                    <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="aspect_ratio" value="1:1" class="accent-amber-500"> 1:1 {{ $isAr ? 'سكوير' : 'Square' }}</label>
+                                    <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="aspect_ratio" value="16:9" class="accent-amber-500"> 16:9 {{ $isAr ? 'أفقي' : 'Landscape' }}</label>
                                 </div>
                             </div>
                         </div>
@@ -987,6 +1182,29 @@
             document.getElementById('loadingBox').classList.remove('hidden');
         });
 
+        const scenarioForm = document.getElementById('scenarioForm');
+        if (scenarioForm) {
+            const scenarioSubmit = document.getElementById('scenarioSubmitBtn');
+            const scenarioLabel = document.getElementById('scenarioSubmitLabel');
+            scenarioForm.addEventListener('submit', function(event) {
+                if (scenarioForm.dataset.submitting === 'true') {
+                    event.preventDefault();
+                    return;
+                }
+
+                scenarioForm.dataset.submitting = 'true';
+                scenarioSubmit.disabled = true;
+                scenarioSubmit.setAttribute('aria-busy', 'true');
+                scenarioSubmit.classList.add('opacity-60', 'cursor-not-allowed');
+                if (scenarioLabel) {
+                    scenarioLabel.dataset.defaultText = scenarioLabel.textContent;
+                    scenarioLabel.textContent = document.getElementById('scenarioIdea')
+                        ? document.getElementById('scenarioIdea').dataset.pendingText || ''
+                        : '';
+                }
+            });
+        }
+
         document.querySelectorAll('[data-example-filter]').forEach(filterButton => {
             filterButton.addEventListener('click', function() {
                 const selectedCategory = this.dataset.exampleFilter || 'all';
@@ -1098,7 +1316,7 @@
                         if (bar) bar.style.width = `${data.progress}%`;
                         if (percent) percent.textContent = `${data.progress}%`;
                         if (stage) stage.textContent = stageLabels[data.stage] || data.stage || '';
-                        if (data.status === 'completed' || data.status === 'failed') {
+                        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
                             window.location.reload();
                             return;
                         }

@@ -36,6 +36,15 @@ class VerticalRevealAnimationTest(unittest.TestCase):
         source = Path(__file__).resolve().parents[1] / "laravel-app/storage/app/public/backgrounds/clean_studio.mp4"
         self.assertIsNone(validate_input_video(source))
 
+    def test_still_background_is_valid_and_becomes_a_timed_clip(self):
+        source = Path(__file__).resolve().parents[1] / "laravel-app/public/backgrounds/rainy_city_street.jpg"
+        self.assertIsNone(validate_input_video(source))
+
+        clip = engine.process_motion_clip(source, 2.0, resolution=(90, 160), motion="static")
+        self.assertAlmostEqual(clip.duration, 2.0)
+        self.assertEqual(clip.get_frame(0.5).shape, (160, 90, 3))
+        clip.close()
+
     def test_smoke_overlay_has_soft_animated_alpha(self):
         smoke = build_smoke_overlay((180, 320), 2.0, seed=7, opacity=0.2)
         first = smoke.mask.get_frame(0.1)
@@ -60,6 +69,48 @@ class VerticalRevealAnimationTest(unittest.TestCase):
         self.assertLess(float(transitioned.mask.get_frame(1.99).max()), 0.1)
         transitioned.close()
         overlay.close()
+
+    def test_horizontal_reveal_masks_move_in_from_both_sides(self):
+        base = np.ones((24, 120), dtype=np.float32)
+        for direction in ("right", "left"):
+            start = engine._horizontal_reveal_mask_frame(base, 0.0, direction, 0.5, 8)
+            middle = engine._horizontal_reveal_mask_frame(base, 0.25, direction, 0.5, 8)
+            finished = engine._horizontal_reveal_mask_frame(base, 1.0, direction, 0.5, 8)
+            self.assertLess(float(start.mean()), 0.1)
+            self.assertGreater(float(middle.mean()), float(start.mean()))
+            np.testing.assert_allclose(finished, base)
+
+    def test_slide_and_wipe_scene_transitions_are_applied(self):
+        overlay = render_reference_card(
+            package={"headline": "Transition test"},
+            size=(180, 320),
+            duration=2,
+            template="classic",
+            anti_border=False,
+        )
+        slide = apply_scene_transition(overlay, 2, 0.2, 0.2, transition="slide", direction="right")
+        self.assertGreater(slide.pos(0)[0], slide.pos(0.5)[0])
+        wipe = apply_scene_transition(overlay, 2, 0.2, 0.2, transition="wipe", direction="right")
+        self.assertGreater(float(wipe.mask.get_frame(0.5).max()), 0.9)
+        self.assertLess(float(wipe.mask.get_frame(1.99).max()), 0.1)
+        slide.close()
+        wipe.close()
+        overlay.close()
+
+    def test_hook_word_by_word_builds_progressive_word_clips(self):
+        clips = engine.build_caption_clips(
+            {"kind": "hook", "text": "Make every word count", "caption": ""},
+            0.0,
+            2.0,
+            (180, 320),
+            "en",
+            "#fb7185",
+            hook_word_by_word=True,
+        )
+        self.assertEqual(len(clips), 4)
+        self.assertEqual([clip.start for clip in clips], sorted(clip.start for clip in clips))
+        for clip in clips:
+            clip.close()
 
     def test_gemini_content_is_marked_as_api_generated(self):
         with patch.object(engine, "_try_gemini_key", return_value={
@@ -198,7 +249,7 @@ class VerticalRevealAnimationTest(unittest.TestCase):
         self.assertGreater(float(middle[35, 0]), float(middle[70, 0]))
         np.testing.assert_allclose(finished, base_mask)
 
-    def test_provider_aliases_are_normalized_and_score_is_bounded(self):
+    def test_provider_aliases_are_normalized_without_fabricating_a_quality_score(self):
         package = _normalize_ai_package({
             "title": "A useful title",
             "point1": "First point",
@@ -212,7 +263,7 @@ class VerticalRevealAnimationTest(unittest.TestCase):
         self.assertEqual(package["headline"], "A useful title")
         self.assertEqual(package["point_2"], "Second point")
         self.assertEqual(package["hashtags"], "#one #two")
-        self.assertEqual(package["score"], 100)
+        self.assertIsNone(package["score"])
 
 
 if __name__ == "__main__":
@@ -269,3 +320,112 @@ class ScenePolishTest(unittest.TestCase):
         self.assertIn(frame.shape[2], (3, 4))
         # Bottom progress segments must survive the anti-border overlay.
         self.assertGreater(int(np.asarray(frame[1651:1659, 600:880]).max()), 0)
+
+
+class StoryboardTest(unittest.TestCase):
+    def test_storyboard_scenes_are_normalized_with_hook_and_cta(self):
+        data = {
+            "headline": "A better morning",
+            "hook": "Your morning decides your day.",
+            "scenes": [
+                {"text": "Drink water first", "caption": "Drink a full glass of water after waking up.", "emphasis": "water", "duration": 2.0},
+                {"text": "Avoid the phone", "caption": "Avoid your phone for the first thirty minutes.", "emphasis": "phone", "duration": 2.2},
+            ],
+            "cta": "Save this for tomorrow",
+            "caption": "Start tomorrow with these habits.",
+            "hashtags": "#morning #habits",
+        }
+
+        normalized = engine._normalize_ai_package(data, "en")
+
+        self.assertEqual(normalized["hook"], "Your morning decides your day.")
+        self.assertEqual(normalized["cta"], "Save this for tomorrow")
+        self.assertEqual(len(normalized["scenes"]), 2)
+        self.assertEqual(normalized["scenes"][0]["emphasis"], "water")
+        self.assertEqual(normalized["point_1"], "Drink a full glass of water after waking up.")
+
+        specs = engine.build_scene_specs(normalized, "morning", "en")
+        self.assertEqual([spec["kind"] for spec in specs], ["hook", "point", "point", "cta"])
+
+    def test_scene_durations_honor_the_requested_length_and_minimums(self):
+        specs = engine.build_scene_specs(
+            {"hook": "Hook", "scenes": [{"text": "One", "caption": "One"}, {"text": "Two", "caption": "Two"}], "cta": "Save"},
+            "topic",
+            "en",
+        )
+        durations = engine.plan_scene_durations(
+            [spec["caption"] or spec["text"] for spec in specs],
+            8,
+            hints=[spec["hint"] for spec in specs],
+            minimums=[spec["min"] for spec in specs],
+        )
+
+        self.assertAlmostEqual(sum(durations), 8.0, places=3)
+        self.assertGreaterEqual(min(durations), 0.9)
+
+    def test_ducking_lowers_music_while_the_voice_is_active(self):
+        import numpy as np
+        from moviepy.audio.AudioClip import AudioArrayClip
+
+        sample_rate = 22050
+        music = AudioArrayClip(np.full((sample_rate * 2, 2), 0.2, dtype=np.float32), fps=sample_rate)
+        voice_array = np.zeros((sample_rate * 2, 2), dtype=np.float32)
+        voice_array[:sample_rate] = 0.6
+        voice = AudioArrayClip(voice_array, fps=sample_rate)
+
+        ducked = engine.duck_music_to_voice(music, voice, 2, base_gain=0.2, duck_gain=0.05)
+        output = ducked.to_soundarray(fps=sample_rate)
+
+        self.assertLess(float(np.abs(output[:sample_rate]).mean()), float(np.abs(output[sample_rate:]).mean()))
+
+    def test_word_captions_and_srt_are_built(self):
+        spec = {"kind": "point", "text": "Drink water", "caption": "Drink a full glass of water every morning.", "emphasis": ""}
+        clips = engine.build_caption_clips(spec, 1.0, 3.0, (720, 1280), "en", "#fb7185", 100)
+
+        self.assertGreater(len(clips), 3)
+        self.assertGreater(clips[0].duration, 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "captions.srt"
+            engine.write_srt([(0, 1.5, "First line"), (1.5, 3.0, "Second line")], str(path))
+            content = path.read_text(encoding="utf-8")
+
+        self.assertIn("00:00:00,000 --> 00:00:01,500", content)
+        self.assertIn("Second line", content)
+
+    def test_all_templates_and_the_end_card_render(self):
+        base = {"headline": "Three simple steps", "emphasis": "", "point_1": "", "point_2": "", "point_3": ""}
+        for template in ("classic", "clean_news", "cinematic", "quote_card"):
+            clip = render_reference_card(base, size=(720, 1280), duration=1, template=template, handle="@page", language="en", progress=(1, 3), kicker="01 / 02")
+            self.assertEqual(clip.size, (720, 1280))
+
+        end_card = engine.render_end_card({"headline": "Save this for later"}, size=(720, 1280), duration=1, handle="@page", language="en", progress=(3, 3))
+        self.assertEqual(end_card.size, (720, 1280))
+
+
+class PreviewImageTest(unittest.TestCase):
+    def test_preview_image_uses_the_requested_resolution(self):
+        from types import SimpleNamespace
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "preview.png"
+            args = SimpleNamespace(
+                language="en",
+                template="quote_card",
+                handle="@page",
+                accent_color="#fb7185",
+                font_scale=100,
+                quality=720,
+                aspect_ratio="9:16",
+                anti_border=True,
+                custom_headline="Live preview",
+                custom_points=["One clear idea"],
+                topic="",
+                preview_image=str(path),
+            )
+
+            engine.build_preview_image(args)
+
+            with Image.open(path) as image:
+                self.assertEqual(image.size, (720, 1280))

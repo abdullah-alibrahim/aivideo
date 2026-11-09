@@ -21,13 +21,15 @@ if [ ! -f "$DIR/laravel-app/public/build/manifest.json" ]; then
   }
 fi
 cd "$DIR/laravel-app"
+PORT="${PORT:-8000}"
 
 echo "=================================================="
 echo "🚀 Starting AI Reel Studio (Laravel 13 + Python)"
 echo "=================================================="
-echo "Local Server URL: http://127.0.0.1:8000"
+echo "Local Server URL: http://127.0.0.1:${PORT}"
 echo "Queue worker:    running in the background"
-echo "Press Ctrl+C to stop the server and the worker."
+echo "Scheduler:       running in the background"
+echo "Press Ctrl+C to stop the server, worker, and scheduler."
 echo "=================================================="
 
 php artisan migrate --force >/dev/null
@@ -35,10 +37,14 @@ php artisan migrate --force >/dev/null
 # Renders run in a queue worker so web requests stay responsive.
 php artisan queue:work --tries=2 --timeout=1200 --sleep=1 &
 WORKER_PID=$!
+php artisan schedule:work --no-interaction &
+SCHEDULER_PID=$!
 cleanup() {
   kill "$WORKER_PID" >/dev/null 2>&1 || true
+  kill "$SCHEDULER_PID" >/dev/null 2>&1 || true
   wait "$WORKER_PID" 2>/dev/null || true
+  wait "$SCHEDULER_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" php artisan serve --port=8000
+PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" php artisan serve --host=127.0.0.1 --port="$PORT"

@@ -1,0 +1,30 @@
+; Copy to /etc/supervisor/conf.d/aivideo.conf and adjust paths/user.
+; Keep APP_ENV, secrets, and credentials in laravel-app/.env or a secret manager.
+
+[program:aivideo-worker]
+command=/usr/bin/php /srv/aivideo/laravel-app/artisan queue:work --sleep=1 --tries=2 --timeout=1200 --max-time=3600
+directory=/srv/aivideo/laravel-app
+user=www-data
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+numprocs=1
+redirect_stderr=true
+stdout_logfile=/var/log/aivideo-worker.log
+stopwaitsecs=1230
+
+process_name=%(program_name)s_%(process_num)02d
+
+[program:aivideo-scheduler]
+command=/usr/bin/php /srv/aivideo/laravel-app/artisan schedule:work --no-interaction
+directory=/srv/aivideo/laravel-app
+user=www-data
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+numprocs=1
+redirect_stderr=true
+stdout_logfile=/var/log/aivideo-scheduler.log
+stopwaitsecs=30

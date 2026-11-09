@@ -31,9 +31,17 @@ class ReelRenderer
             (int) config('studio.limits.render_lock_seconds', 900),
             (int) config('studio.engine.render_timeout_seconds', 900) + 60,
         );
-        $lock = Cache::lock('studio:render:global', $lockSeconds);
+        $lock = null;
+        $maxConcurrentRenders = max(1, (int) config('studio.limits.max_concurrent_renders', 1));
+        for ($slot = 0; $slot < $maxConcurrentRenders; $slot++) {
+            $candidate = Cache::lock('studio:render:slot:'.$slot, $lockSeconds);
+            if ($candidate->get()) {
+                $lock = $candidate;
+                break;
+            }
+        }
 
-        if (! $lock->get()) {
+        if ($lock === null) {
             throw new RenderFailedException(
                 stage: 'busy',
                 retryable: false,
@@ -42,6 +50,13 @@ class ReelRenderer
         }
 
         $outputAbsolute = Storage::disk('public')->path($outputRelativePath);
+        $baseName = pathinfo($outputRelativePath, PATHINFO_FILENAME);
+        $thumbnailRelativePath = 'thumbnails/'.$baseName.'.jpg';
+        $subtitleRelativePath = 'subtitles/'.$baseName.'.srt';
+        $thumbnailAbsolute = Storage::disk('public')->path($thumbnailRelativePath);
+        $subtitleAbsolute = Storage::disk('public')->path($subtitleRelativePath);
+        Storage::disk('public')->makeDirectory('thumbnails');
+        Storage::disk('public')->makeDirectory('subtitles');
         $progressFile = $this->progressFile($reel);
         $this->ensureProgressDirectory();
 
@@ -49,7 +64,7 @@ class ReelRenderer
             @unlink($progressFile);
 
             $process = new Process(
-                $this->buildCommand($reel, $inputPaths, $musicPath, $options, $outputAbsolute, $progressFile),
+                $this->buildCommand($reel, $inputPaths, $musicPath, $options, $outputAbsolute, $progressFile, $thumbnailAbsolute, $subtitleAbsolute),
                 base_path('../'),
                 $this->buildEnvironment($reel, $options),
             );
@@ -59,16 +74,27 @@ class ReelRenderer
 
             $lastStage = null;
             $lastPercent = -1;
+            $recordedProviderFailures = [];
             $process->start();
 
             while ($process->isRunning()) {
-                $this->applyProgress($reel, $progressFile, $lastStage, $lastPercent);
+                if ($reel->fresh()?->cancel_requested_at) {
+                    $process->stop(5);
+
+                    throw new RenderFailedException(
+                        stage: 'cancelled',
+                        retryable: false,
+                        userMessage: trans('studio.errors.cancelled', [], $reel->language),
+                    );
+                }
+
+                $this->applyProgress($reel, $progressFile, $lastStage, $lastPercent, $recordedProviderFailures);
                 $process->checkTimeout();
                 usleep(800_000);
             }
 
             $process->wait();
-            $this->applyProgress($reel, $progressFile, $lastStage, $lastPercent);
+            $this->applyProgress($reel, $progressFile, $lastStage, $lastPercent, $recordedProviderFailures);
 
             if (! $process->isSuccessful()) {
                 throw $this->failureFromProcess($reel, $process);
@@ -85,9 +111,14 @@ class ReelRenderer
                 );
             }
 
+            $data['thumbnail_path'] = is_file($thumbnailAbsolute) ? $thumbnailRelativePath : null;
+            $data['subtitle_path'] = is_file($subtitleAbsolute) ? $subtitleRelativePath : null;
+
             return $data;
         } catch (ProcessTimedOutException $exception) {
             @unlink($outputAbsolute);
+            @unlink($thumbnailAbsolute);
+            @unlink($subtitleAbsolute);
 
             throw new RenderFailedException(
                 stage: 'timeout',
@@ -97,10 +128,14 @@ class ReelRenderer
             );
         } catch (RenderFailedException $exception) {
             @unlink($outputAbsolute);
+            @unlink($thumbnailAbsolute);
+            @unlink($subtitleAbsolute);
 
             throw $exception;
         } catch (\Throwable $exception) {
             @unlink($outputAbsolute);
+            @unlink($thumbnailAbsolute);
+            @unlink($subtitleAbsolute);
 
             throw new RenderFailedException(
                 stage: 'render_failed',
@@ -109,13 +144,15 @@ class ReelRenderer
                 logMessage: $exception->getMessage(),
             );
         } finally {
-            $lock->release();
+            if ($lock !== null) {
+                $lock->release();
+            }
             @unlink($progressFile);
         }
     }
 
     /** @return array<int, string> */
-    private function buildCommand(Reel $reel, array $inputPaths, ?string $musicPath, array $options, string $outputAbsolute, string $progressFile): array
+    private function buildCommand(Reel $reel, array $inputPaths, ?string $musicPath, array $options, string $outputAbsolute, string $progressFile, string $thumbnailAbsolute, string $subtitleAbsolute): array
     {
         $command = [
             $this->pythonBinary($reel->language),
@@ -134,14 +171,39 @@ class ReelRenderer
             '--handle', (string) ($reel->handle ?? ''),
             '--aspect-ratio', (string) $reel->aspect_ratio,
             '--camera-motion', (string) $reel->camera_motion,
+            '--text-motion', (string) ($options['text_motion'] ?? 'vertical'),
+            '--scene-transition', (string) ($options['scene_transition'] ?? 'template'),
             '--font-scale', (string) (int) ($options['font_scale'] ?? 100),
             '--background-dimming', (string) (int) ($options['background_dimming'] ?? 35),
             '--progress-file', $progressFile,
+            '--quality', (string) (int) ($options['quality'] ?? 1080),
+            '--thumbnail', $thumbnailAbsolute,
+            '--srt-output', $subtitleAbsolute,
             '--json',
         ];
 
         if (! empty($options['anti_border'])) {
             $command[] = '--anti-border';
+        }
+
+        if (! empty($options['manual_content'])) {
+            $command[] = '--manual-content';
+        }
+
+        if (array_key_exists('captions', $options) && ! $options['captions']) {
+            $command[] = '--no-captions';
+        }
+
+        if (array_key_exists('auto_music', $options) && ! $options['auto_music']) {
+            $command[] = '--no-auto-music';
+        }
+
+        if (! empty($options['hook_word_by_word'])) {
+            $command[] = '--hook-word-by-word';
+        }
+
+        if (array_key_exists('highlight_important', $options) && ! $options['highlight_important']) {
+            $command[] = '--no-highlight-important';
         }
 
         if (! empty($options['voiceover'])) {
@@ -187,7 +249,7 @@ class ReelRenderer
     /** @return array<string, string> */
     private function buildEnvironment(Reel $reel, array $options): array
     {
-        $geminiKeys = $this->mergeKeys(
+        $geminiKeys = ! empty($options['manual_content']) ? [] : $this->mergeKeys(
             $this->keyRing->rotatedValues('gemini'),
             $this->configuredGeminiKeys(),
             (array) ($options['gemini_keys'] ?? []),
@@ -280,7 +342,7 @@ class ReelRenderer
         }
     }
 
-    private function applyProgress(Reel $reel, string $progressFile, ?string &$lastStage, int &$lastPercent): void
+    private function applyProgress(Reel $reel, string $progressFile, ?string &$lastStage, int &$lastPercent, array &$recordedProviderFailures): void
     {
         if (! is_file($progressFile)) {
             return;
@@ -289,6 +351,31 @@ class ReelRenderer
         $payload = json_decode((string) @file_get_contents($progressFile), true);
         if (! is_array($payload)) {
             return;
+        }
+
+        $newFailures = [];
+        foreach ((array) ($payload['failed_provider_keys'] ?? []) as $failure) {
+            if (! is_array($failure)) {
+                continue;
+            }
+
+            $fingerprint = $failure['fingerprint'] ?? null;
+            if (! is_string($fingerprint) || preg_match('/^[a-f0-9]{64}$/D', $fingerprint) !== 1 || in_array($fingerprint, $recordedProviderFailures, true)) {
+                continue;
+            }
+
+            $status = $failure['status'] ?? null;
+            $reason = $failure['reason'] ?? null;
+            $newFailures[] = [
+                'fingerprint' => $fingerprint,
+                'status' => is_int($status) && $status >= 100 && $status <= 599 ? $status : null,
+                'reason' => is_string($reason) && in_array($reason, ['network unavailable', 'invalid provider response', 'provider error', 'HTTP 401', 'HTTP 403', 'HTTP 429', 'HTTP 500', 'HTTP 501', 'HTTP 502', 'HTTP 503', 'HTTP 504'], true) ? $reason : null,
+            ];
+            $recordedProviderFailures[] = $fingerprint;
+        }
+
+        if ($newFailures !== []) {
+            $this->keyRing->recordRenderOutcomes($newFailures, null);
         }
 
         $stage = (string) ($payload['stage'] ?? '');
@@ -323,6 +410,13 @@ class ReelRenderer
             );
         }
 
+        $successFingerprint = $data['provider_key_fingerprint'] ?? null;
+        if (! is_string($successFingerprint) || preg_match('/^[a-f0-9]{64}$/D', $successFingerprint) !== 1) {
+            $successFingerprint = null;
+        }
+        $this->keyRing->recordRenderOutcomes([], $successFingerprint);
+        unset($data['provider_key_fingerprint']);
+
         return $data;
     }
 
@@ -338,6 +432,11 @@ class ReelRenderer
 
         [$stage, $retryable] = match (true) {
             str_contains($errorOutput, 'Gemini API key is required') => ['gemini_required', false],
+            str_contains($errorOutput, 'HTTP 401') => ['gemini_key_invalid', false],
+            str_contains($errorOutput, 'HTTP 403') => ['gemini_restricted', false],
+            str_contains($errorOutput, 'HTTP 429') => ['gemini_quota', true],
+            preg_match('/HTTP 5\d{2}/', $errorOutput) === 1 => ['gemini_unavailable', true],
+            str_contains($errorOutput, 'network unavailable') => ['provider_unreachable', true],
             str_contains($errorOutput, 'Gemini') => ['gemini_failed', true],
             str_contains($errorOutput, 'No valid input') => ['input_invalid', false],
             stripos($errorOutput, 'font') !== false => ['font_missing', false],

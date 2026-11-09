@@ -27,3 +27,9 @@ laravel-app/storage/app/public/backgrounds/
 
 # Build output is generated
 laravel-app/public/build/
+
+# Generated poster, subtitle, and preview media
+laravel-app/storage/app/public/thumbnails/
+laravel-app/storage/app/public/subtitles/
+laravel-app/storage/app/public/previews/
+python_engine/storage/music/

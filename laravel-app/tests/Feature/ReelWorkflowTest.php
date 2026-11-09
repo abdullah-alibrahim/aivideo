@@ -2,13 +2,55 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\GenerateReelVideo;
 use App\Models\Reel;
+use App\Models\ReelCollection;
+use App\Services\FactCheckService;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ReelWorkflowTest extends TestCase
 {
+    public function test_analytics_dashboard_renders_key_metrics(): void
+    {
+        Reel::create(['title' => 'Complete', 'topic' => 'Complete', 'language' => 'en', 'status' => 'completed', 'duration' => 12]);
+        Reel::create(['title' => 'Failed', 'topic' => 'Failed', 'language' => 'ar', 'status' => 'failed']);
+
+        $this->get(route('analytics.dashboard', ['lang' => 'en']))
+            ->assertOk()
+            ->assertSee('Analytics Dashboard')
+            ->assertSee('Recent reels')
+            ->assertSee('Complete');
+    }
+
+    public function test_fact_check_endpoint_returns_structured_report(): void
+    {
+        $this->mock(FactCheckService::class, function ($mock): void {
+            $mock->shouldReceive('check')->once()->andReturn([
+                'status' => 'review',
+                'confidence' => 64,
+                'summary' => 'Needs a source.',
+                'claims' => [['claim' => 'A claim', 'verdict' => 'uncertain', 'reason' => 'No source supplied.', 'needs_source' => true, 'recommendation' => 'Add a source.']],
+                'risk_flags' => ['Health claim'],
+                'disclaimer' => 'AI screening only.',
+                'ai_model' => 'test-model',
+            ]);
+        });
+
+        $this->postJson(route('ai.fact-check'), [
+            'language' => 'en',
+            'topic' => 'Health topic',
+            'script' => 'A claim without a citation.',
+        ])->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('report.status', 'review')
+            ->assertJsonPath('report.claims.0.needs_source', true);
+    }
+
     public function test_wizard_renders_in_arabic_with_a_csrf_token(): void
     {
         $this->get(route('reels.wizard', ['lang' => 'ar']))
@@ -28,7 +70,54 @@ class ReelWorkflowTest extends TestCase
             ->assertDontSee('Studio Pro')
             ->assertDontSee('Sound Collection')
             ->assertDontSee('Green and Gold')
-            ->assertDontSee('Abdullah Al-Ibrahem');
+            ->assertDontSee('Abdullah Al-Ibrahem')
+            ->assertSee('value="finance_grid_still"', false)
+            ->assertSee('data-background-search', false)
+            ->assertSee('data-background-type="video"', false)
+            ->assertSee('data-background-type="image"', false)
+            ->assertSee('data-background-category="nature"', false)
+            ->assertSee('data-background-favorites', false)
+            ->assertSee('value="rainy_city_motion"', false)
+            ->assertSee('value="ocean_dusk"', false)
+            ->assertSee('id="motionPreset"', false)
+            ->assertSee('value="cinematic_depth"', false)
+            ->assertSee('id="cameraMotion"', false)
+            ->assertSee('id="sceneTransition"', false)
+            ->assertSee('value="rainy_city_street"', false)
+            ->assertSee($this->renderableBackgroundCount().' خلفية محلية')
+            ->assertSee('مكتبة الخلفيات');
+    }
+
+    /**
+     * Count catalog entries that actually exist on disk, mirroring the
+     * controller filter so the picker badge stays in sync with the page.
+     */
+    private function renderableBackgroundCount(): int
+    {
+        return collect(config('reel-backgrounds', []))->filter(function (array $background): bool {
+            $directory = ($background['asset_directory'] ?? 'storage') === 'public'
+                ? public_path('backgrounds')
+                : storage_path('app/public/backgrounds');
+
+            return is_file($directory.'/'.$background['file']) && is_file($directory.'/'.$background['poster']);
+        })->count();
+    }
+
+    public function test_preview_rejects_an_unknown_template(): void
+    {
+        $this->postJson(route('reels.preview'), ['template' => 'unknown'])
+            ->assertUnprocessable();
+    }
+
+    public function test_preview_reports_a_missing_renderer(): void
+    {
+        config()->set('studio.engine.python_bin', '/nonexistent/python3');
+
+        $this->postJson(route('reels.preview'), [
+            'headline' => 'Preview',
+            'language' => 'en',
+            'template' => 'classic',
+        ])->assertStatus(502);
     }
 
     public function test_security_headers_are_sent_on_html_responses(): void
@@ -94,6 +183,27 @@ class ReelWorkflowTest extends TestCase
             ->assertJsonPath('progress', 35)
             ->assertJsonPath('stage', 'generating_with_gemini')
             ->assertJsonPath('ready', false);
+    }
+
+    public function test_cancel_route_marks_a_running_reel_for_safe_cancellation(): void
+    {
+        $reel = Reel::create([
+            'title' => 'Cancelable render',
+            'topic' => 'Cancelable render',
+            'language' => 'en',
+            'status' => 'processing',
+            'progress' => 42,
+            'progress_stage' => 'rendering',
+        ]);
+
+        $this->post(route('reels.cancel', $reel))
+            ->assertRedirect(route('reels.index', ['active' => $reel->id, 'lang' => 'en']))
+            ->assertSessionHas('success');
+
+        $reel->refresh();
+        $this->assertSame('cancellation_requested', $reel->status);
+        $this->assertSame('cancelling', $reel->progress_stage);
+        $this->assertNotNull($reel->cancel_requested_at);
     }
 
     public function test_idea_suggestion_returns_a_complete_result(): void
@@ -271,5 +381,195 @@ class ReelWorkflowTest extends TestCase
             ->get(route('reels.stream', $reel))
             ->assertStatus(416)
             ->assertHeader('Content-Range', 'bytes */10');
+    }
+
+    public function test_quality_check_endpoint_returns_a_persistable_pre_render_report(): void
+    {
+        $this->postJson(route('reels.quality-check'), [
+            'headline' => 'A clear short hook',
+            'topic' => 'Focus habits',
+            'user_prompt' => 'A practical short video about focus habits.',
+            'line1' => 'Turn off notifications.',
+            'line2' => 'Work in short sessions.',
+            'duration' => 10,
+            'aspect_ratio' => '9:16',
+            'language' => 'en',
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('report.stage', 'pre_render')
+            ->assertJsonPath('report.checks.0.key', 'hook')
+            ->assertJsonPath('report.checks.1.status', 'pass')
+            ->assertJsonPath('report.checks.3.status', 'pass');
+    }
+
+    public function test_generation_creates_distinct_version_reels_in_one_collection(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        Storage::fake('public');
+        config(['services.gemini.keys_json' => json_encode(['test-gemini-key'])]);
+
+        $this->post(route('reels.store'), [
+            'generation_mode' => 'variants',
+            'variant_count' => 3,
+            'topic' => 'Better focus',
+            'user_prompt' => 'Create a useful short video about focus.',
+            'language' => 'en',
+            'duration' => 10,
+            'aspect_ratio' => '9:16',
+            'videos' => [UploadedFile::fake()->createWithContent('source.mp4', "\x00\x00\x00\x18ftypmp42".str_repeat("\0", 128))],
+        ])->assertRedirect();
+
+        $this->assertDatabaseCount('reels', 3);
+        $this->assertDatabaseCount('reel_collections', 1);
+        $reels = Reel::orderBy('collection_position')->get();
+        $this->assertSame([1, 2, 3], $reels->pluck('collection_position')->all());
+        $this->assertCount(1, $reels->pluck('collection_id')->unique());
+        $this->assertCount(3, $reels->pluck('user_prompt')->unique());
+        $this->assertNotEmpty($reels->first()->quality_report['checks']);
+        Queue::assertPushed(GenerateReelVideo::class, 3);
+    }
+
+    public function test_scenario_requires_an_active_gemini_key_before_generating(): void
+    {
+        config(['services.gemini.keys_json' => '[]']);
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $response = $this->from(route('reels.wizard'))
+            ->post(route('reels.scenario'), [
+                'idea' => 'Commit to one project for 48 hours.',
+                'language' => 'en',
+            ]);
+
+        $response->assertRedirect(route('reels.wizard'))
+            ->assertSessionHasErrors('idea');
+        $this->assertDatabaseCount('reels', 0);
+    }
+
+    public function test_scenario_turns_a_plain_idea_into_a_queued_manual_render(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        Storage::fake('public');
+        $this->fakeGemini([
+            'title' => '48-Hour Project Sprint',
+            'headline' => 'Give one project exactly 48 hours.',
+            'points' => ['Pick the one project that matters most.', 'Clear every distraction before you start.', 'Ship a visible result before the timer ends.'],
+            'caption' => 'Two days, one project, zero excuses.',
+            'hashtags' => '#focus #productivity #discipline',
+        ]);
+        config(['services.gemini.keys_json' => json_encode(['test-gemini-key'])]);
+
+        $response = $this->post(route('reels.scenario'), [
+            'idea' => 'Commit to one project for the first 48 hours without distraction',
+            'language' => 'en',
+            'template' => 'bold_stripe',
+            'duration' => 10,
+            'goal' => 'saves',
+            'videos' => [UploadedFile::fake()->createWithContent('source.mp4', "\x00\x00\x00\x18ftypmp42".str_repeat("\0", 128))],
+        ]);
+
+        $reel = Reel::query()->first();
+        $this->assertNotNull($reel);
+        $response->assertRedirect(route('reels.index', ['active' => $reel->id, 'lang' => 'en']))
+            ->assertSessionHas('success', __('studio.flash.scenario_queued', [], 'en'))
+            ->assertSessionHas('scenario.headline', 'Give one project exactly 48 hours.');
+
+        $this->assertSame('queued', $reel->status);
+        $this->assertTrue($reel->render_options['manual_content']);
+        $this->assertSame('Give one project exactly 48 hours.', $reel->render_options['custom_headline']);
+        $this->assertCount(3, $reel->render_options['custom_points']);
+        $this->assertSame('bold_stripe', $reel->template);
+        $this->assertSame('saves', $reel->goal);
+        $this->assertSame('Commit to one project for the first 48 hours without distraction', $reel->user_prompt);
+        $this->assertNotEmpty($reel->quality_report['checks']);
+        Queue::assertPushed(GenerateReelVideo::class, 1);
+    }
+
+    public function test_scenario_rejects_an_incomplete_gemini_script_without_queuing(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $this->fakeGemini(['headline' => '', 'points' => []]);
+        config(['services.gemini.keys_json' => json_encode(['test-gemini-key'])]);
+
+        $response = $this->from(route('reels.wizard'))
+            ->post(route('reels.scenario'), [
+                'idea' => 'Commit to one project for 48 hours.',
+                'language' => 'en',
+            ]);
+
+        $response->assertRedirect(route('reels.wizard'))
+            ->assertSessionHasErrors('idea');
+        $this->assertDatabaseCount('reels', 0);
+    }
+
+    public function test_batch_topics_create_one_queued_reel_per_topic(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        Storage::fake('public');
+        config(['services.gemini.keys_json' => json_encode(['test-gemini-key'])]);
+
+        $this->post(route('reels.store'), [
+            'generation_mode' => 'batch',
+            'batch_topics' => "Sleep routines\nDaily reading",
+            'user_prompt' => 'Keep every video concise and practical.',
+            'language' => 'en',
+            'duration' => 10,
+            'aspect_ratio' => '9:16',
+            'videos' => [UploadedFile::fake()->createWithContent('source.mp4', "\x00\x00\x00\x18ftypmp42".str_repeat("\0", 128))],
+        ])->assertRedirect();
+
+        $this->assertDatabaseCount('reels', 2);
+        $this->assertSame(['Sleep routines', 'Daily reading'], Reel::orderBy('collection_position')->pluck('topic')->all());
+        $this->assertDatabaseHas('reel_collections', ['type' => 'batch', 'item_count' => 2]);
+        Queue::assertPushed(GenerateReelVideo::class, 2);
+    }
+
+    public function test_deleting_a_collection_member_preserves_shared_source_files_until_last_reference(): void
+    {
+        Storage::fake('public');
+        Storage::fake('local');
+        Storage::disk('local')->put('input_videos/shared.mp4', 'source');
+        Storage::disk('local')->put('bg_music/shared.mp3', 'music');
+        $collection = ReelCollection::create(['id' => (string) Str::uuid(), 'type' => 'batch', 'label' => 'Shared', 'item_count' => 2]);
+        $shared = ['input_videos/shared.mp4'];
+        $first = Reel::create(['title' => 'First', 'topic' => 'First', 'collection_id' => $collection->id, 'input_videos' => $shared, 'bg_music_path' => 'bg_music/shared.mp3']);
+        $second = Reel::create(['title' => 'Second', 'topic' => 'Second', 'collection_id' => $collection->id, 'input_videos' => $shared, 'bg_music_path' => 'bg_music/shared.mp3']);
+
+        $this->delete(route('reels.destroy', $first))->assertRedirect();
+        Storage::disk('local')->assertExists('input_videos/shared.mp4');
+        Storage::disk('local')->assertExists('bg_music/shared.mp3');
+
+        $this->delete(route('reels.destroy', $second))->assertRedirect();
+        Storage::disk('local')->assertMissing('input_videos/shared.mp4');
+        Storage::disk('local')->assertMissing('bg_music/shared.mp3');
+        $this->assertDatabaseMissing('reel_collections', ['id' => $collection->id]);
+    }
+
+    public function test_collection_download_contains_completed_video_exports(): void
+    {
+        if (! class_exists(\ZipArchive::class)) {
+            $this->markTestSkipped('PHP ZipArchive extension is not installed.');
+        }
+
+        Storage::fake('public');
+        Storage::disk('public')->put('reels/first.mp4', 'first-video');
+        $collection = ReelCollection::create(['id' => (string) Str::uuid(), 'type' => 'variants', 'label' => 'Focus', 'item_count' => 1]);
+        $reel = Reel::create([
+            'title' => 'Focus version',
+            'topic' => 'Focus',
+            'status' => 'completed',
+            'output_video_path' => 'reels/first.mp4',
+            'collection_id' => $collection->id,
+            'collection_position' => 1,
+        ]);
+
+        $this->get(route('reels.collections.download', $collection->id))
+            ->assertOk()
+            ->assertDownload('focus-versions.zip');
     }
 }

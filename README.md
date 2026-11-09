@@ -43,6 +43,10 @@ chmod +x start.sh
 يشغّل `start.sh` خادم Laravel وعامل طابور (`queue:work`) معاً. الرندر لا يحدث داخل طلب الويب:
 يُعاد الرد فوراً بحالة `queued`، ويتابع عامل الطابور العمل ويعرض تقدّماً حقيقياً في الواجهة.
 
+من شريط التنقل افتح **Dashboard / التحليلات** لعرض الإنتاج اليومي، حالات الرندر، اللغات، المجالات، القوالب، متوسط المدة، وآخر الريلز والمجموعات.
+
+من خطوة تقييم الفيديو في الـ Wizard استخدم **Fact-check / فحص الحقائق** لتحليل الادعاءات وتحديد ما يحتاج مصدرًا خارجيًا. هذه مراجعة أولية بالذكاء الاصطناعي وليست تحققًا صحفيًا أو تصفحًا للمصادر؛ راجع يدويًا أي محتوى إخباري أو صحي أو مالي أو قانوني قبل النشر.
+
 للتحقق من جاهزية البيئة (Python، FFmpeg، الخط العربي، التخزين، الطابور، المفاتيح):
 
 ```bash
@@ -64,6 +68,7 @@ STUDIO_AUTH_PASSWORD=use-a-long-random-password
 STUDIO_MAX_VIDEO_MB=100
 STUDIO_MAX_MUSIC_MB=20
 STUDIO_MAX_CONCURRENT_RENDERS=1
+STUDIO_MIN_FREE_SPACE_MB=1024
 STUDIO_STALE_AFTER_MINUTES=30
 ```
 
@@ -76,7 +81,15 @@ cd laravel-app
 php artisan reels:recover-stale
 ```
 
-للنشر الأكبر، انقل الرندر إلى Queue Worker محدود بدلاً من تشغيله داخل طلب الويب.
+للنشر الأكبر، انقل الرندر إلى Queue Worker محدود بدلاً من تشغيله داخل طلب الويب. يدعم Laravel PostgreSQL وRedis مباشرة؛ غيّر `DB_CONNECTION=pgsql` و`QUEUE_CONNECTION=redis` في `.env` بعد تجهيز الخدمتين. توجد أمثلة جاهزة في `deploy/supervisor/aivideo.conf.example` و`deploy/nginx/aivideo.conf.example`.
+
+قبل النشر نفّذ:
+
+```bash
+./scripts/deploy-check.sh
+```
+
+يتحقق السكربت من الاعتماديات، يشغل migrations و`studio:doctor`، يبني أصول الواجهة، ويرفض وضع production إذا كان debug مفعّلًا.
 
 ## Fresh installation
 
@@ -146,7 +159,7 @@ php artisan reels:prune --days=30 --dry-run
 ./scripts/restore.sh /secure/backups/aivideo-YYYYMMDD
 ```
 
-تشمل النسخة `database.sqlite` وملفات الفيديو والصوت المدخلة ومقاطع reels المولدة. لا يضع السكربت `APP_KEY` داخل الأرشيف؛ خزنه منفصلاً بشكل آمن، لأن فقدانه قد يمنع فك البيانات المشفرة.
+تشمل النسخة `database.sqlite` وملفات الفيديو والصوت المدخلة ومقاطع reels المولدة والصور المصغرة والترجمات والمعاينات. لا يضع السكربت `APP_KEY` داخل الأرشيف؛ خزنه منفصلاً بشكل آمن، لأن فقدانه قد يمنع فك البيانات المشفرة.
 
 ## CI and dependency reproducibility
 

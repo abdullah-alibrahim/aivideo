@@ -1,58 +1,112 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# AI Reels Studio
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+هذا المجلد يحتوي تطبيق Laravel لواجهة AI Reels Studio. التطبيق يدير الـ Wizard، مفاتيح مزودي الذكاء الاصطناعي، طابور الرندر، مكتبة الريلز، والبث الجزئي للفيديو. محرك الرندر موجود في `../python_engine/` ويستخدم Python وMoviePy وFFmpeg.
 
-## About Laravel
+## المتطلبات
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- PHP 8.3 أو أحدث مع `mbstring` و`pdo_sqlite` و`fileinfo`.
+- Composer.
+- Node.js 22 أو أحدث وnpm.
+- Python 3.11 أو أحدث وFFmpeg أو `imageio-ffmpeg`.
+- مفتاح Gemini للتوليد المدعوم بالذكاء الاصطناعي. يمكن تشغيل الوضع اليدوي دون Gemini.
+- مفتاح ElevenLabs وVoice ID اختياريان للتعليق الصوتي.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## التثبيت المحلي
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+من جذر المشروع:
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+composer install --working-dir=laravel-app
+cp laravel-app/.env.example laravel-app/.env
+php laravel-app/artisan key:generate
+php laravel-app/artisan migrate --force
+npm ci --prefix laravel-app
+npm run build --prefix laravel-app
+python3 -m venv venv
+./venv/bin/pip install -r requirements.lock.txt
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+ضع مفاتيح المزودين في شاشة Provider Key Manager أو في `.env` المحلي. لا تحفظ `.env` أو مفاتيح API في Git.
 
-## Contributing
+## التشغيل
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+./start.sh
+```
 
-## Code of Conduct
+يفتح التطبيق على `http://127.0.0.1:8000` ويشغل Laravel وQueue worker وScheduler. طلب إنشاء الريل يعيد الحالة `queued` فورًا، ثم يتابع العامل الرندر ويحدث التقدم.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+للتأكد من البيئة:
 
-## Security Vulnerabilities
+```bash
+cd laravel-app
+php artisan studio:doctor
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+يختبر الأمر PHP، قاعدة البيانات، Python، FFmpeg، الخط العربي، صلاحيات التخزين، الطابور، مساحة القرص، ومؤشرات أمان الإنتاج.
 
-## License
+## أوامر الصيانة
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```bash
+php artisan reels:recover-stale
+php artisan reels:prune --days=30
+php artisan reels:prune --days=30 --dry-run
+php artisan config:clear
+```
+
+`reels:prune` يحذف الرندرات الفاشلة القديمة والملفات اليتيمة مع الحفاظ على الملفات المشار إليها من قاعدة البيانات.
+
+## الإعدادات المهمة
+
+```env
+APP_ENV=local
+APP_DEBUG=true
+QUEUE_CONNECTION=database
+STUDIO_MAX_VIDEO_MB=100
+STUDIO_MAX_MUSIC_MB=20
+STUDIO_MAX_CONCURRENT_RENDERS=1
+STUDIO_RENDER_TIMEOUT_SECONDS=900
+```
+
+`STUDIO_MAX_CONCURRENT_RENDERS` يحدد عدد أقفال الرندر المتاحة فعليًا. القيمة الافتراضية `1` تمنع الضغط على جهاز محلي واحد.
+
+## قبل التعريض للشبكة
+
+استخدم HTTPS، وغيّر الإعدادات التالية على الأقل:
+
+```env
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://your-domain.example
+STUDIO_AUTH_ENABLED=true
+STUDIO_AUTH_USERNAME=admin
+STUDIO_AUTH_PASSWORD=use-a-long-random-password
+```
+
+شغّل `studio:doctor` بعد ضبطها. في الإنتاج لا تعتمد على `start.sh` لإدارة الخدمات؛ استخدم Supervisor أو systemd لعامل Queue وScheduler، واستبدل SQLite وdatabase queue بـ PostgreSQL/MySQL وRedis عند زيادة عدد المستخدمين أو حجم الرندر.
+
+## التخزين والنسخ الاحتياطي
+
+تُخزّن الملفات المدخلة في `storage/app/input_videos` و`storage/app/bg_music`، بينما تُخزّن المخرجات والصور المصغرة والترجمات في التخزين العام. أنشئ نسخة متسقة أثناء وضع الصيانة:
+
+```bash
+../scripts/backup.sh /secure/backups/aivideo-$(date +%Y%m%d)
+../scripts/restore.sh /secure/backups/aivideo-YYYYMMDD
+```
+
+تشمل النسخة قاعدة البيانات، الملفات المدخلة، الريلز، الصور المصغرة، الترجمات، والمعاينات عند وجودها. لا تشمل `APP_KEY`؛ خزّنه منفصلًا في مدير أسرار.
+
+## الاختبارات
+
+```bash
+php artisan test --compact
+../venv/bin/python3 -m unittest ../python_engine/test_smart_reels.py -v
+vendor/bin/pint --dirty --format agent
+npm run build
+```
+
+تغطي اختبارات Laravel مسارات الرفع والتوليد والطابور والمصادقة والبث والحذف، بينما تغطي اختبارات Python حركات النص، RTL، الصوت، الانتقالات، البطاقات، Gemini، والملفات الناتجة.
+
+## حدود المنتج
+
+المحرك يركّب الفيديو أو الخلفيات مع بطاقات نص وحركة وصوت اختياري؛ لا يولد لقطات فيديو جديدة من وصف نصي ولا يحسب انتشارًا حقيقيًا. نتائج Gemini تحتاج مراجعة بشرية قبل النشر، خصوصًا للمحتوى المالي أو الطبي.

@@ -41,6 +41,12 @@ class GenerateReelVideo implements ShouldQueue
             return;
         }
 
+        if ($reel->cancel_requested_at) {
+            $this->markCancelled($reel);
+
+            return;
+        }
+
         $reel->forceFill([
             'status' => 'processing',
             'progress' => max(5, (int) $reel->progress),
@@ -52,6 +58,12 @@ class GenerateReelVideo implements ShouldQueue
             $data = $renderer->render($reel, $this->inputPaths, $this->musicPath, $this->options, $this->outputRelativePath);
         } catch (RenderFailedException $exception) {
             Storage::disk('public')->delete($this->outputRelativePath);
+
+            if ($exception->stage === 'cancelled') {
+                $this->markCancelled($reel);
+
+                return;
+            }
 
             if ($exception->retryable && $this->attempts() < $this->tries) {
                 $reel->forceFill(['progress_stage' => 'retrying'])->save();
@@ -78,6 +90,13 @@ class GenerateReelVideo implements ShouldQueue
             return;
         }
 
+        if ($reel->fresh()?->cancel_requested_at) {
+            Storage::disk('public')->delete($this->outputRelativePath);
+            $this->markCancelled($reel);
+
+            return;
+        }
+
         $this->markCompleted($reel, $data);
     }
 
@@ -86,6 +105,12 @@ class GenerateReelVideo implements ShouldQueue
         $reel = $this->reel->fresh();
 
         if (! $reel instanceof Reel || $reel->status === 'completed') {
+            return;
+        }
+
+        if ($reel->cancel_requested_at || $reel->status === 'cancellation_requested') {
+            $this->markCancelled($reel);
+
             return;
         }
 
@@ -121,6 +146,8 @@ class GenerateReelVideo implements ShouldQueue
             'progress_stage' => 'completed',
             'output_video_path' => $this->outputRelativePath,
             'output_video_url' => Storage::disk('public')->url($this->outputRelativePath),
+            'thumbnail_path' => $data['thumbnail_path'] ?? null,
+            'subtitle_path' => $data['subtitle_path'] ?? null,
             'generated_script' => $script,
             'caption' => $caption,
             'hashtags' => $hashtags,
@@ -140,6 +167,16 @@ class GenerateReelVideo implements ShouldQueue
             'status' => 'failed',
             'progress_stage' => $stage,
             'error_message' => $message,
+        ])->save();
+    }
+
+    private function markCancelled(Reel $reel): void
+    {
+        $reel->forceFill([
+            'status' => 'cancelled',
+            'progress_stage' => 'cancelled',
+            'cancelled_at' => now(),
+            'error_message' => trans('studio.errors.cancelled', [], $reel->language),
         ])->save();
     }
 }

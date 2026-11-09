@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Reel;
+use App\Models\ReelCollection;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
@@ -27,8 +28,12 @@ class PruneReels extends Command
         $deletedReels = 0;
         foreach ($reels as $reel) {
             if (! $dryRun) {
+                $collectionId = $reel->collection_id;
                 $this->deleteOwnedFiles($reel);
                 $reel->delete();
+                if ($collectionId) {
+                    ReelCollection::query()->whereKey($collectionId)->doesntHave('reels')->delete();
+                }
             }
             $deletedReels++;
         }
@@ -47,22 +52,36 @@ class PruneReels extends Command
             Storage::disk('public')->delete($reel->output_video_path);
         }
 
+        foreach ([$reel->thumbnail_path, $reel->subtitle_path] as $mediaPath) {
+            if (is_string($mediaPath) && (str_starts_with($mediaPath, 'thumbnails/') || str_starts_with($mediaPath, 'subtitles/'))) {
+                Storage::disk('public')->delete($mediaPath);
+            }
+        }
+
         foreach (array_merge((array) ($reel->input_videos ?? []), [$reel->bg_music_path]) as $path) {
             if (! is_string($path) || $path === '' || str_contains($path, '..')) {
                 continue;
             }
 
             if (str_starts_with($path, 'input_videos/') || str_starts_with($path, 'bg_music/')) {
-                Storage::disk('local')->delete($path);
+                $isStillReferenced = Reel::query()
+                    ->where('id', '<>', $reel->getKey())
+                    ->get(['input_videos', 'bg_music_path'])
+                    ->contains(static fn (Reel $candidate): bool => $candidate->bg_music_path === $path
+                        || in_array($path, $candidate->input_videos ?? [], true));
+                if (! $isStillReferenced) {
+                    Storage::disk('local')->delete($path);
+                }
             }
         }
     }
 
     private function pruneOrphanFiles(Carbon $cutoff, bool $dryRun): int
     {
-        $referencedPublic = Reel::query()
-            ->whereNotNull('output_video_path')
-            ->pluck('output_video_path')
+        $referencedPublic = collect()
+            ->merge(Reel::query()->whereNotNull('output_video_path')->pluck('output_video_path'))
+            ->merge(Reel::query()->whereNotNull('thumbnail_path')->pluck('thumbnail_path'))
+            ->merge(Reel::query()->whereNotNull('subtitle_path')->pluck('subtitle_path'))
             ->filter()
             ->flip();
 
@@ -74,15 +93,17 @@ class PruneReels extends Command
 
         $deleted = 0;
 
-        foreach (Storage::disk('public')->allFiles('reels') as $file) {
-            if ($referencedPublic->has($file) || Storage::disk('public')->lastModified($file) >= $cutoff->timestamp) {
-                continue;
-            }
+        foreach (['reels', 'thumbnails', 'subtitles'] as $directory) {
+            foreach (Storage::disk('public')->allFiles($directory) as $file) {
+                if ($referencedPublic->has($file) || Storage::disk('public')->lastModified($file) >= $cutoff->timestamp) {
+                    continue;
+                }
 
-            if (! $dryRun) {
-                Storage::disk('public')->delete($file);
+                if (! $dryRun) {
+                    Storage::disk('public')->delete($file);
+                }
+                $deleted++;
             }
-            $deleted++;
         }
 
         foreach (['input_videos', 'bg_music'] as $directory) {

@@ -100,6 +100,78 @@ BACKGROUNDS = [
         "pattern": "studio",
         "seed": 71,
     },
+    {
+        "id": "ember_dunes",
+        "file": "ember_dunes.mp4",
+        "poster": "ember_dunes.jpg",
+        "colors": [(26, 11, 21), (63, 27, 28), (31, 15, 24)],
+        "glows": [
+            {"color": (214, 116, 53), "cx": 0.78, "cy": 0.18, "rx": 0.56, "ry": 0.26, "strength": 0.33, "dx": 0.05, "dy": 0.03, "offset": 0.4},
+            {"color": (122, 55, 62), "cx": 0.16, "cy": 0.85, "rx": 0.58, "ry": 0.24, "strength": 0.24, "dx": 0.07, "dy": 0.045, "offset": 2.9},
+        ],
+        "pattern": "dunes",
+        "seed": 83,
+    },
+    {
+        "id": "cyber_pulse",
+        "file": "cyber_pulse.mp4",
+        "poster": "cyber_pulse.jpg",
+        "colors": [(7, 9, 18), (12, 16, 33), (9, 12, 26)],
+        "glows": [
+            {"color": (222, 60, 170), "cx": 0.20, "cy": 0.20, "rx": 0.42, "ry": 0.26, "strength": 0.30, "dx": 0.08, "dy": 0.04, "offset": 0.8},
+            {"color": (56, 128, 236), "cx": 0.84, "cy": 0.83, "rx": 0.46, "ry": 0.26, "strength": 0.28, "dx": 0.07, "dy": 0.04, "offset": 2.5},
+        ],
+        "pattern": "pulse",
+        "seed": 97,
+    },
+    {
+        "id": "forest_mist",
+        "file": "forest_mist.mp4",
+        "poster": "forest_mist.jpg",
+        "colors": [(6, 17, 14), (13, 33, 26), (8, 21, 19)],
+        "glows": [
+            {"color": (62, 152, 112), "cx": 0.82, "cy": 0.16, "rx": 0.60, "ry": 0.26, "strength": 0.28, "dx": 0.07, "dy": 0.035, "offset": 1.2},
+            {"color": (28, 94, 78), "cx": 0.12, "cy": 0.86, "rx": 0.62, "ry": 0.25, "strength": 0.26, "dx": 0.08, "dy": 0.04, "offset": 3.3},
+        ],
+        "pattern": "mist",
+        "seed": 113,
+    },
+    {
+        "id": "starfield_dream",
+        "file": "starfield_dream.mp4",
+        "poster": "starfield_dream.jpg",
+        "colors": [(3, 5, 14), (8, 10, 24), (4, 7, 16)],
+        "glows": [
+            {"color": (98, 86, 196), "cx": 0.70, "cy": 0.22, "rx": 0.62, "ry": 0.30, "strength": 0.26, "dx": 0.06, "dy": 0.05, "offset": 0.5},
+            {"color": (32, 108, 168), "cx": 0.22, "cy": 0.84, "rx": 0.56, "ry": 0.26, "strength": 0.22, "dx": 0.08, "dy": 0.04, "offset": 2.8},
+        ],
+        "pattern": "stars",
+        "seed": 131,
+    },
+    {
+        "id": "royal_gem",
+        "file": "royal_gem.mp4",
+        "poster": "royal_gem.jpg",
+        "colors": [(15, 7, 33), (29, 14, 60), (16, 9, 37)],
+        "glows": [
+            {"color": (204, 158, 74), "cx": 0.76, "cy": 0.20, "rx": 0.52, "ry": 0.26, "strength": 0.30, "dx": 0.06, "dy": 0.04, "offset": 0.1},
+            {"color": (106, 66, 186), "cx": 0.18, "cy": 0.86, "rx": 0.60, "ry": 0.26, "strength": 0.28, "dx": 0.08, "dy": 0.045, "offset": 3.6},
+        ],
+        "pattern": "royal",
+        "seed": 149,
+    },
+    {
+        "id": "soft_paper",
+        "file": "soft_paper.mp4",
+        "poster": "soft_paper.jpg",
+        "colors": [(196, 190, 178), (222, 216, 204), (206, 199, 187)],
+        "glows": [
+            {"color": (244, 240, 231), "cx": 0.48, "cy": 0.10, "rx": 0.80, "ry": 0.30, "strength": 0.35, "dx": 0.04, "dy": 0.02, "offset": 0.9},
+            {"color": (168, 160, 148), "cx": 0.90, "cy": 0.92, "rx": 0.56, "ry": 0.22, "strength": 0.22, "dx": 0.06, "dy": 0.03, "offset": 3.1},
+        ],
+        "pattern": "paper",
+        "seed": 167,
+    },
 ]
 
 
@@ -190,6 +262,58 @@ def make_frame(spec: dict, phase: float, x: np.ndarray, y: np.ndarray, noise: np
         image = mix_color(image, (128, 165, 184), lines)
         horizon = np.exp(-(((y - 0.12) / 0.004) ** 2)) * 0.09
         image = mix_color(image, (128, 165, 184), horizon)
+    elif pattern == "dunes":
+        # Warm dune ridges drift slowly; ridges stay away from the headline zone.
+        for idx, (ridge_y, amp) in enumerate(((0.62, 0.030), (0.76, 0.036), (0.90, 0.042))):
+            center = ridge_y + amp * np.sin(x * (2.1 + idx * 0.6) + phase + idx * 1.7)
+            ridge = np.exp(-(((y - center) / 0.016) ** 2)) * (0.10 - idx * 0.02)
+            image = mix_color(image, (232, 158, 82) if idx == 0 else (150, 84, 58), ridge)
+        grain_sand = np.mod(x * 61.0 + y * 23.0, 1.0)
+        image = mix_color(image, (188, 128, 76), (grain_sand < 0.012) * 0.05)
+    elif pattern == "pulse":
+        # Concentric pulse rings emanate from two off-center points.
+        for ring_idx, (origin, base_color) in enumerate((
+            ((0.26, 0.34), (44, 176, 255)),
+            ((0.74, 0.72), (236, 86, 196)),
+        )):
+            progress = np.mod(phase * 0.55 + ring_idx * 0.5, 1.0)
+            radius = 0.08 + progress * 0.55
+            distance = np.sqrt(((x - origin[0]) / 0.85) ** 2 + ((y - origin[1]) / 1.5) ** 2)
+            ring = np.exp(-(((distance - radius) / 0.028) ** 2)) * max(0.0, 0.16 * (1.0 - progress))
+            image = mix_color(image, base_color, ring)
+    elif pattern == "mist":
+        # Slow fog banks slide horizontally through a green valley.
+        bank = np.sin(x * 4.6 + y * 5.2 + phase) * 0.5 + 0.5
+        fog = (np.exp(-(((y - (0.34 + 0.10 * np.sin(x * 2.6 + phase * 0.9))) / 0.16) ** 2)) * bank) * 0.18
+        image = mix_color(image, (178, 214, 196), fog)
+        canopy = np.exp(-(((y - (0.80 + 0.05 * np.sin(x * 3.1 - phase))) / 0.05) ** 2)) * 0.12
+        image = mix_color(image, (74, 152, 108), canopy)
+    elif pattern == "stars":
+        # Deterministic star lattice with a gentle twinkle; nebula glow stays faint.
+        lattice_x = np.mod(x * 26.0, 1.0) - 0.5
+        lattice_y = np.mod(y * 46.0, 1.0) - 0.5
+        dot = np.exp(-(((lattice_x / 0.20) ** 2 + (lattice_y / 0.20) ** 2) / 0.05)) ** 2
+        twinkle = 0.7 + 0.3 * np.sin(phase * 1.4 + x * 14.0 + y * 9.0)
+        image = mix_color(image, (222, 230, 245), dot * twinkle * 0.55)
+        nebula = np.exp(-(((y - (0.62 + 0.05 * np.sin(x * 3.0 + phase * 0.6))) / 0.20) ** 2)) * 0.07
+        image = mix_color(image, (86, 96, 208), nebula)
+    elif pattern == "royal":
+        # A slow golden sheen sweeps diagonally across a deep purple field.
+        sweep = (x * 0.85 + y * 0.45) - 0.06 * np.sin(phase)
+        sheen = np.exp(-(((sweep - 0.85) / 0.10) ** 2)) * 0.14
+        image = mix_color(image, (226, 180, 96), sheen)
+        gems = np.mod(x * 17.0 + y * 29.0, 1.0)
+        sparkle = np.exp(-((gems - 0.5) / 0.002) ** 2) * 0.05
+        image = mix_color(image, (244, 214, 130), sparkle)
+        edge_light = np.exp(-(((y - 0.5) ** 2) / 0.02)) * np.clip((np.abs(x - 0.5) - 0.25) * 2.0, 0.0, 1.0) * 0.08
+        image = mix_color(image, (132, 92, 214), edge_light)
+    elif pattern == "paper":
+        # Soft daylight paper with drifting archival shadows; keeps copy crisp.
+        shade = np.sin(x * 2.8 + phase * 0.8) * 0.5 + 0.5
+        shadow = np.exp(-(((y - (0.72 + 0.08 * np.sin(x * 1.9 - phase * 0.7))) / 0.14) ** 2)) * shade * 0.10
+        image = mix_color(image, (150, 142, 128), shadow)
+        fold = np.exp(-(((np.mod(x + 0.04 * np.sin(phase), 0.4)) - 0.2) / 0.02) ** 2) * 0.05
+        image = mix_color(image, (255, 252, 244), fold)
 
     # Subtle edge falloff and stable fine grain reduce banding without competing with text.
     edge = np.maximum(np.abs(x - 0.5) * 2.0, np.abs(y - 0.5) * 2.0)
@@ -228,9 +352,20 @@ def render_video(spec: dict, output_dir: Path, ffmpeg: str, x: np.ndarray, y: np
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--only",
+        nargs="*",
+        default=None,
+        help="Render only the listed background ids; the manifest still covers every asset.",
+    )
     args = parser.parse_args()
     output_dir = args.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    targets = BACKGROUNDS if args.only is None else [spec for spec in BACKGROUNDS if spec["id"] in set(args.only)]
+    unknown = set(args.only or []) - {spec["id"] for spec in BACKGROUNDS}
+    if unknown:
+        parser.error(f"Unknown background ids: {', '.join(sorted(unknown))}")
 
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     x_grid, y_grid = np.meshgrid(
@@ -238,7 +373,7 @@ def main() -> None:
         np.linspace(0.0, 1.0, HEIGHT, dtype=np.float32),
     )
 
-    for spec in BACKGROUNDS:
+    for spec in targets:
         rng = np.random.default_rng(spec["seed"])
         grain = rng.normal(0.0, 0.75, size=(HEIGHT, WIDTH)).astype(np.float32)
         first_frame = make_frame(spec, 0.0, x_grid, y_grid, grain)

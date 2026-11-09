@@ -111,9 +111,9 @@ class ProviderApiKeyController extends Controller
                 'gemini' => Http::acceptJson()
                     ->connectTimeout(3)
                     ->timeout(10)
-                    ->get('https://generativelanguage.googleapis.com/v1beta/models', [
-                        'key' => (string) $providerApiKey->secret,
-                        'pageSize' => 1,
+                    ->post('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='.urlencode((string) $providerApiKey->secret), [
+                        'contents' => [['parts' => [['text' => 'Reply with the single word OK.']]]],
+                        'generationConfig' => ['temperature' => 0, 'maxOutputTokens' => 4],
                     ]),
                 'elevenlabs' => Http::acceptJson()
                     ->connectTimeout(3)
@@ -128,6 +128,7 @@ class ProviderApiKeyController extends Controller
                 'last_tested_at' => now(),
                 'last_error' => 'The provider could not be reached.',
                 'cooldown_until' => now()->addMinutes(2),
+                'error_count' => $providerApiKey->error_count + 1,
             ])->save();
 
             return redirect()->route('settings.provider-keys', ['lang' => $this->language()])
@@ -141,6 +142,12 @@ class ProviderApiKeyController extends Controller
         $status = $response->status();
         $now = now();
         if ($response->successful()) {
+            if ($providerApiKey->provider === 'gemini' && ! filled(data_get($response->json(), 'candidates.0.content.parts.0.text'))) {
+                $status = 502;
+            }
+        }
+
+        if ($status >= 200 && $status < 300) {
             $providerApiKey->forceFill([
                 'health_status' => 'healthy',
                 'last_tested_at' => $now,
@@ -158,6 +165,7 @@ class ProviderApiKeyController extends Controller
             'last_tested_at' => $now,
             'last_error' => $this->safeFailureReason($status),
             'cooldown_until' => null,
+            'error_count' => $providerApiKey->error_count + 1,
         ];
         $message = $this->safeFailureReason($status);
 

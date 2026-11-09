@@ -15,10 +15,13 @@ tar -czf "$DEST/media.tar.gz" -C "$APP/storage/app" input_videos bg_music 2>/dev
 if [ -d "$APP/storage/app/public/reels" ]; then
   tar -czf "$DEST/reels.tar.gz" -C "$APP/storage/app/public" reels
 fi
+if [ -d "$APP/storage/app/public/thumbnails" ] || [ -d "$APP/storage/app/public/subtitles" ] || [ -d "$APP/storage/app/public/previews" ]; then
+  tar -czf "$DEST/derived-media.tar.gz" -C "$APP/storage/app/public" --ignore-failed-read thumbnails subtitles previews
+fi
 cat > "$DEST/README.txt" <<EOF
 AI Reel Studio backup
 Created: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-Contains: database.sqlite, media.tar.gz, reels.tar.gz when present.
+Contains: database.sqlite, media.tar.gz, reels.tar.gz and derived-media.tar.gz when present.
 Keep the Laravel APP_KEY separately in a password manager or encrypted secret store.
 Do not commit this directory.
 EOF

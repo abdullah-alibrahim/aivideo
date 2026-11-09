@@ -65,7 +65,7 @@
             <div class="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-300"><i class="fa-solid fa-shield-halved"></i></div>
             <div>
                 <h2 class="font-extrabold text-white">{{ $isAr ? 'المفاتيح محمية' : 'Your keys stay protected' }}</h2>
-                <p class="mt-1 max-w-3xl text-xs leading-6 text-slate-400">{{ $isAr ? 'تُشفّر المفاتيح عند حفظها باستخدام مفتاح تشفير التطبيق. لن تظهر القيمة كاملة بعد الحفظ؛ ستشاهد الاسم وآخر أربعة أحرف فقط. اختبار الاتصال لا يولّد نصاً أو صوتاً. 401 يعطّل المفتاح، و429 أو العطل المؤقت يضعه في مهلة؛ أما 403 فيُعرض كقيد صلاحية ولا يعطّل المفتاح.' : 'Keys are encrypted at rest with the application encryption key. Full values are never shown after saving. Connection tests do not generate text or audio. A 401 disables a key; rate limits and temporary outages trigger a cooldown. A 403 is treated as a possible permission restriction, not an invalid key.' }}</p>
+                <p class="mt-1 max-w-3xl text-xs leading-6 text-slate-400">{{ $isAr ? 'تُشفّر المفاتيح عند حفظها باستخدام مفتاح تشفير التطبيق. لن تظهر القيمة كاملة بعد الحفظ؛ ستشاهد الاسم وآخر أربعة أحرف فقط. اختبار Gemini يرسل طلب generateContent قصيراً بحد أقصى 4 رموز خرج وقد يُحتسب ضمن حصة المزود؛ اختبار ElevenLabs يقرأ حالة الحساب. 401 يعطّل المفتاح، و429 أو العطل المؤقت يضعه في مهلة؛ أما 403 فيُعرض كقيد صلاحية ولا يعطّل المفتاح.' : 'Keys are encrypted at rest with the application encryption key. Full values are never shown after saving. The Gemini check sends a short generateContent request capped at 4 output tokens and may count toward provider quota; ElevenLabs checks account status. A 401 disables a key; rate limits and temporary outages trigger a cooldown. A 403 is treated as a possible permission restriction, not an invalid key.' }}</p>
             </div>
         </div>
     </section>
@@ -120,6 +120,7 @@
                             </div>
 
                             <div class="mt-2 space-y-1 text-[10px] leading-5 text-slate-400">
+                                <p>{{ $isAr ? 'أخطاء الطلبات:' : 'Request errors:' }} {{ $key->error_count }}</p>
                                 @if($key->last_tested_at)
                                     <p>{{ $isAr ? 'آخر فحص:' : 'Last check:' }} {{ $key->last_tested_at->format('Y-m-d H:i') }}
                                         @if($key->last_success_at) · {{ $isAr ? 'آخر نجاح:' : 'Last success:' }} {{ $key->last_success_at->format('Y-m-d H:i') }} @endif
@@ -129,7 +130,18 @@
                                     <p>{{ $isAr ? 'آخر تدوير:' : 'Last selected:' }} {{ $key->last_used_at->format('Y-m-d H:i') }} · {{ $isAr ? 'مرات الاختيار:' : 'Selections:' }} {{ $key->use_count }}</p>
                                 @endif
                                 @if($key->last_error)
-                                    <p class="text-amber-300">{{ $key->last_error }}</p>
+                                    @php
+                                        $lastError = (string) $key->last_error;
+                                        $lastErrorKey = match (true) {
+                                            str_contains($lastError, '401') => 'unauthorized',
+                                            str_contains($lastError, '403') => 'forbidden',
+                                            str_contains($lastError, '429') => 'rate_limited',
+                                            preg_match('/\b5\d{2}\b/', $lastError) === 1 => 'unavailable',
+                                            stripos($lastError, 'network') !== false => 'network',
+                                            default => 'generic',
+                                        };
+                                    @endphp
+                                    <p class="text-amber-300">{{ trans('studio.key_errors.'.$lastErrorKey, [], $lang) }}</p>
                                 @endif
                                 @if($key->cooldown_until && $key->cooldown_until->isFuture())
                                     <p>{{ $isAr ? 'تنتهي المهلة:' : 'Cooldown ends:' }} {{ $key->cooldown_until->format('Y-m-d H:i') }}</p>

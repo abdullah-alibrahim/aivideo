@@ -68,11 +68,27 @@ class StudioDoctor extends Command
         }
         $this->check($rows, 'Queue', $queue !== '', "{$queue} ({$pending} pending job(s))", $failures);
 
+        $storageRoot = storage_path('app');
+        $freeBytes = @disk_free_space($storageRoot);
+        $freeDetails = $freeBytes === false ? 'Could not determine free space' : $this->formatBytes((int) $freeBytes).' free';
+        $minimumFreeBytes = (int) config('studio.limits.min_free_space_mb', 1024) * 1024 * 1024;
+        $this->check($rows, 'Storage space', $freeBytes === false || $freeBytes >= $minimumFreeBytes, $freeDetails, $failures);
+
         $geminiKeys = array_filter(array_merge(
             $keyRing->activeValues('gemini'),
             (array) json_decode((string) config('services.gemini.keys_json', '[]'), true),
         ));
         $this->check($rows, 'Gemini keys', $geminiKeys !== [], count($geminiKeys).' key(s) available', $failures);
+
+        $productionSafe = config('app.env') !== 'production'
+            || (! config('app.debug') && config('studio.security.enabled'));
+        $this->check(
+            $rows,
+            'Production safety',
+            $productionSafe,
+            $productionSafe ? 'Safe defaults detected' : 'Production requires APP_DEBUG=false and Studio auth enabled',
+            $failures,
+        );
 
         if (config('app.debug') && ! config('studio.security.enabled')) {
             $rows[] = ['Exposure', '<fg=yellow>warn</>', 'APP_DEBUG is on and Studio auth is off; keep it on localhost only'];
@@ -117,5 +133,18 @@ class StudioDoctor extends Command
         } catch (Throwable) {
             return null;
         }
+    }
+
+    private function formatBytes(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $size = (float) $bytes;
+        $unit = 0;
+        while ($size >= 1024 && $unit < count($units) - 1) {
+            $size /= 1024;
+            $unit++;
+        }
+
+        return number_format($size, 1).' '.$units[$unit];
     }
 }

@@ -85,11 +85,13 @@ class ProviderApiKeyManagementTest extends TestCase
         $this->assertDatabaseMissing('provider_api_keys', ['id' => $key->id]);
     }
 
-    public function test_gemini_check_uses_model_listing_and_records_a_success_without_generation(): void
+    public function test_gemini_check_calls_generate_content_with_a_small_prompt_and_records_success(): void
     {
         Http::preventStrayRequests();
         Http::fake([
-            'generativelanguage.googleapis.com/v1beta/models*' => Http::response(['models' => []], 200),
+            'generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent*' => Http::response([
+                'candidates' => [['content' => ['parts' => [['text' => 'OK']]]]],
+            ], 200),
         ]);
 
         $key = ProviderApiKey::query()->create([
@@ -108,15 +110,18 @@ class ProviderApiKeyManagementTest extends TestCase
         $this->assertNotNull($key->fresh()->last_tested_at);
         $this->assertNotNull($key->fresh()->last_success_at);
         $this->assertNull($key->fresh()->last_error);
-        Http::assertSent(static fn (HttpRequest $request): bool => $request->method() === 'GET'
-            && str_contains($request->url(), '/v1beta/models'));
+        $this->assertSame(0, $key->fresh()->error_count);
+        Http::assertSent(static fn (HttpRequest $request): bool => $request->method() === 'POST'
+            && str_contains($request->url(), 'gemini-2.5-flash:generateContent')
+            && data_get($request->data(), 'generationConfig.maxOutputTokens') === 4
+            && data_get($request->data(), 'contents.0.parts.0.text') === 'Reply with the single word OK.');
     }
 
     public function test_unauthorized_key_is_disabled_rate_limit_is_cooled_and_forbidden_scope_is_not_disabled(): void
     {
         Http::preventStrayRequests();
         Http::fake([
-            'generativelanguage.googleapis.com/v1beta/models*' => Http::response([], 401),
+            'generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent*' => Http::response([], 401),
             'api.elevenlabs.io/v1/user' => Http::sequence()
                 ->push([], 429)
                 ->push([], 403),
@@ -144,12 +149,15 @@ class ProviderApiKeyManagementTest extends TestCase
 
         $this->assertFalse($invalid->fresh()->is_active);
         $this->assertSame('failed', $invalid->fresh()->health_status);
+        $this->assertSame(1, $invalid->fresh()->error_count);
         $this->assertStringNotContainsString('AIzaInvalidKeyExample00000001', $invalid->fresh()->last_error);
         $this->assertTrue($rateLimited->fresh()->is_active);
         $this->assertSame('cooldown', $rateLimited->fresh()->health_status);
+        $this->assertSame(1, $rateLimited->fresh()->error_count);
         $this->assertNotNull($rateLimited->fresh()->cooldown_until);
         $this->assertTrue($restricted->fresh()->is_active);
         $this->assertSame('restricted', $restricted->fresh()->health_status);
+        $this->assertSame(1, $restricted->fresh()->error_count);
         $this->assertNull($restricted->fresh()->cooldown_until);
     }
 
@@ -227,5 +235,32 @@ class ProviderApiKeyManagementTest extends TestCase
         $this->assertSame($first->secret, $ring->rotatedValues('gemini')[0]);
         $this->assertSame(2, $first->fresh()->use_count);
         $this->assertSame(1, $second->fresh()->use_count);
+    }
+
+    public function test_render_outcomes_disable_unauthorized_keys_and_cool_down_rate_limited_keys(): void
+    {
+        $invalid = ProviderApiKey::query()->create([
+            'provider' => 'gemini',
+            'secret' => 'AIzaRenderInvalidKeyForOutcomeTest01',
+            'is_active' => true,
+        ]);
+        $limited = ProviderApiKey::query()->create([
+            'provider' => 'gemini',
+            'secret' => 'AIzaRenderRateLimitForOutcomeTest002',
+            'is_active' => true,
+        ]);
+
+        app(ProviderKeyRing::class)->recordRenderOutcomes([
+            ['fingerprint' => hash('sha256', $invalid->secret), 'status' => 401],
+            ['fingerprint' => hash('sha256', $limited->secret), 'status' => 429],
+        ], null);
+
+        $this->assertFalse($invalid->fresh()->is_active);
+        $this->assertSame('failed', $invalid->fresh()->health_status);
+        $this->assertSame(1, $invalid->fresh()->error_count);
+        $this->assertTrue($limited->fresh()->is_active);
+        $this->assertSame('cooldown', $limited->fresh()->health_status);
+        $this->assertSame(1, $limited->fresh()->error_count);
+        $this->assertNotNull($limited->fresh()->cooldown_until);
     }
 }

@@ -2,6 +2,16 @@
 @php
     $isAr = ($lang ?? 'ar') === 'ar';
     $dir = $isAr ? 'rtl' : 'ltr';
+    $qualityCopy = [
+        'ready' => trans('studio.quality.ready', [], $lang),
+        'review' => trans('studio.quality.review', [], $lang),
+        'score' => trans('studio.quality.score', [], $lang),
+        'checks' => trans('studio.quality.checks', [], $lang),
+        'states' => trans('studio.quality.states', [], $lang),
+        'details' => trans('studio.quality.details', [], $lang),
+        'checking' => $isAr ? 'جارٍ فحص الجاهزية...' : 'Checking readiness…',
+        'failed' => $isAr ? 'تعذّر إجراء الفحص. تحقق من الاتصال ثم أعد المحاولة.' : 'The check failed. Check the connection and try again.',
+    ];
 @endphp
 <html lang="{{ $isAr ? 'ar' : 'en' }}" dir="{{ $dir }}" class="dark">
 <head>
@@ -221,6 +231,10 @@
                     <i class="fa-solid fa-key text-amber-400"></i>
                     <span class="hidden sm:inline">إدارة المفاتيح</span>
                 </a>
+                <a href="{{ route('analytics.dashboard', ['lang' => $lang ?? 'ar']) }}" aria-label="{{ $isAr ? 'لوحة التحليلات' : 'Analytics dashboard' }}" class="flex items-center gap-2 rounded-xl border border-sky-500/30 bg-slate-800 px-2.5 sm:px-3 py-2 text-[11px] font-bold text-sky-200 transition hover:bg-slate-700">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span class="hidden sm:inline">{{ $isAr ? 'التحليلات' : 'Analytics' }}</span>
+                </a>
                 <div class="hidden sm:flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-bold text-amber-400">
                     <i class="fa-solid fa-coins"></i>
                     <span>تجميع محلي</span>
@@ -233,6 +247,30 @@
     <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
 
         <div id="wizardStatus" class="hidden mb-5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200" role="status" aria-live="polite"></div>
+
+        <div class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-[11px] text-slate-400">
+            <p id="wizardDraftStatus" role="status" aria-live="polite">{{ $isAr ? 'تُحفظ تغييرات الويزارد محلياً في هذا المتصفح. لا تُحفظ الملفات أو مفاتيح API المؤقتة.' : 'Wizard changes are saved locally in this browser. Uploaded files and temporary API keys are not saved.' }}</p>
+            <div class="flex flex-wrap items-center gap-2">
+                <select id="wizardPresetSelect" class="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[11px] text-slate-300" aria-label="{{ $isAr ? 'اختيار إعداد محفوظ' : 'Choose saved preset' }}">
+                    <option value="">{{ $isAr ? 'الإعدادات المحفوظة' : 'Saved presets' }}</option>
+                </select>
+                <button type="button" id="saveWizardPreset" class="rounded-lg border border-amber-400/40 px-3 py-1.5 font-bold text-amber-200 hover:bg-amber-500/10">{{ $isAr ? 'حفظ إعداد' : 'Save preset' }}</button>
+                <button type="button" id="loadWizardPreset" class="rounded-lg border border-slate-700 px-3 py-1.5 font-bold text-slate-300 hover:border-amber-400 hover:text-white">{{ $isAr ? 'استعادة' : 'Load' }}</button>
+                <button type="button" id="clearWizardDraft" class="rounded-lg border border-slate-700 px-3 py-1.5 font-bold text-slate-300 hover:border-amber-400 hover:text-white">{{ $isAr ? 'مسح المسودة' : 'Clear draft' }}</button>
+            </div>
+        </div>
+
+        @if ($errors->any())
+            <div class="mb-5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-100" role="alert" tabindex="-1" id="serverValidationErrors">
+                <strong>{{ $isAr ? 'راجع الحقول التالية:' : 'Please review the following:' }}</strong>
+                <ul class="mt-2 list-disc ps-5 space-y-1 text-xs">
+                    @foreach ($errors->all() as $error)
+                        <li>{{ $error }}</li>
+                    @endforeach
+                </ul>
+            </div>
+            <script>document.getElementById('serverValidationErrors')?.focus();</script>
+        @endif
 
         <form action="{{ route('reels.store') }}" method="POST" enctype="multipart/form-data" id="wizardMultiStepForm">
             @csrf
@@ -256,6 +294,29 @@
                         <label for="inputTopic" class="block text-xs font-bold text-slate-300 mb-1.5">الموضوع أو الفكرة اللي ببالك (اختياري)</label>
                         <input type="text" id="inputTopic" name="topic" value="" placeholder="مثلاً: تنظيم الوقت"
                             class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm">
+                    </div>
+
+                    <div class="rounded-2xl border border-slate-800 bg-slate-950/50 p-4 space-y-3">
+                        <label for="generationMode" class="block text-xs font-bold text-slate-200">{{ $isAr ? 'طريقة التوليد' : 'Generation mode' }}</label>
+                        <select id="generationMode" name="generation_mode" onchange="toggleGenerationOptions(this.value)" class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
+                            <option value="single" {{ old('generation_mode', 'single') === 'single' ? 'selected' : '' }}>{{ $isAr ? 'فيديو واحد' : 'One video' }}</option>
+                            <option value="variants" {{ old('generation_mode') === 'variants' ? 'selected' : '' }}>{{ $isAr ? 'نسخ متعددة لنفس الفكرة' : 'Multiple versions of one idea' }}</option>
+                            <option value="batch" {{ old('generation_mode') === 'batch' ? 'selected' : '' }}>{{ $isAr ? 'دفعة مواضيع مختلفة' : 'Batch of different topics' }}</option>
+                        </select>
+                        <div id="variantOptions" class="hidden space-y-2">
+                            <label for="variantCount" class="block text-[11px] font-bold text-slate-300">{{ $isAr ? 'عدد النسخ' : 'Number of versions' }}</label>
+                            <select id="variantCount" name="variant_count" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
+                                @foreach ([3, 4, 5] as $variantCount)
+                                    <option value="{{ $variantCount }}" {{ (int) old('variant_count', 3) === $variantCount ? 'selected' : '' }}>{{ $variantCount }}</option>
+                                @endforeach
+                            </select>
+                            <p class="text-[10px] text-slate-400">{{ $isAr ? 'تختلف النسخ في الهوك والنبرة والدعوة للتفاعل، مع فروق بسيطة في المدة.' : 'Versions vary their hook, tone and call to action, with modest duration changes.' }}</p>
+                        </div>
+                        <div id="batchOptions" class="hidden space-y-2">
+                            <label for="batchTopics" class="block text-[11px] font-bold text-slate-300">{{ $isAr ? 'موضوع واحد في كل سطر (2–5)' : 'One topic per line (2–5)' }}</label>
+                            <textarea id="batchTopics" name="batch_topics" rows="4" placeholder="{{ $isAr ? "تنظيم الوقت\nعادات القراءة\nالتركيز في العمل" : "Time management\nReading habits\nFocus at work" }}" class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs leading-relaxed">{{ old('batch_topics') }}</textarea>
+                            <p class="text-[10px] text-slate-400">{{ $isAr ? 'تُنشأ مهمة منفصلة لكل موضوع، وبحد أقصى خمسة فيديوهات في الطلب.' : 'A separate render is queued for each topic, up to five videos per request.' }}</p>
+                        </div>
                     </div>
                 </div>
 
@@ -321,6 +382,8 @@
                             <option value="classic" selected>Classic</option>
                             <option value="clean_news">Clean News</option>
                             <option value="cinematic">Cinematic Glass</option>
+                            <option value="quote_card">Quote Card</option>
+                            <option value="bold_stripe">Bold Stripe</option>
                         </select>
                     </div>
                     <div>
@@ -361,7 +424,7 @@
 
                 <button type="button" onclick="triggerAiIdea()" class="w-full py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base transition shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2">
                     <i class="fa-solid fa-wand-magic-sparkles"></i>
-                    <span>اقترح فكرة من القوالب المحلية</span>
+                    <span>{{ $isAr ? 'اقترح فكرة عبر Gemini' : 'Generate an idea with Gemini' }}</span>
                     <i class="fa-solid fa-arrow-left"></i>
                 </button>
             </div>
@@ -493,7 +556,22 @@
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
                     <!-- Text-card preview (not a rendered video) -->
-                    <div class="lg:col-span-5 studio-card p-6 lg:sticky lg:top-24 space-y-4">
+                    <div class="lg:col-span-5 lg:sticky lg:top-24 space-y-4">
+                        <div class="studio-card p-4 space-y-3">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <h3 class="font-bold text-white text-sm">{{ $isAr ? 'معاينة حقيقية من المحرك' : 'Real engine preview' }}</h3>
+                                    <p class="text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'تُرسم بنفس الخط والتخطيط المستخدم في التصدير، وليست محاكاة HTML.' : 'Rendered with the same font and layout used for export, not an HTML approximation.' }}</p>
+                                </div>
+                                <button type="button" onclick="requestRealPreview()" id="realPreviewBtn" class="flex-shrink-0 rounded-xl bg-amber-500 px-3 py-2 text-[11px] font-black text-slate-950 transition hover:bg-amber-400 disabled:opacity-60">
+                                    {{ $isAr ? 'تحديث المعاينة' : 'Refresh preview' }}
+                                </button>
+                            </div>
+                            <img id="realPreviewImage" alt="" class="hidden mx-auto max-h-[520px] rounded-2xl border border-slate-700 bg-black">
+                            <p id="realPreviewStatus" role="status" aria-live="polite" class="text-[11px] text-slate-400"></p>
+                        </div>
+
+                        <div class="studio-card p-6 space-y-4">
                         <div class="reel-preview-frame rounded-2xl bg-[#030712] bg-cover bg-center p-4 flex flex-col justify-between border border-slate-800 relative overflow-hidden" id="liveDesignCardBox">
                             <div class="flex items-center justify-between text-[10px] text-slate-400 z-10">
                                 <span id="cardLiveHandle" dir="ltr">{{ old('handle', '') }}</span>
@@ -548,6 +626,19 @@
 
                         <!-- PANEL A: الألوان والحركة -->
                         <div id="subPanelColors" class="space-y-5">
+                            <div>
+                                <label for="motionPreset" class="block text-xs font-bold text-slate-300 mb-1.5">{{ $isAr ? 'مكتبة المشاهد والحركة' : 'Scene & motion library' }}</label>
+                                <select id="motionPreset" name="motion_preset" onchange="applyMotionPreset(this.value)" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-amber-500/30 text-white text-xs">
+                                    <option value="custom" @selected(old('motion_preset', 'custom') === 'custom')>{{ $isAr ? 'تخصيص يدوي' : 'Custom setup' }}</option>
+                                    <option value="subtle_story" @selected(old('motion_preset') === 'subtle_story')>{{ $isAr ? 'قصة هادئة — Zoom + Fade' : 'Subtle story — Zoom + Fade' }}</option>
+                                    <option value="cinematic_depth" @selected(old('motion_preset') === 'cinematic_depth')>{{ $isAr ? 'عمق سينمائي — Parallax + انتقال متنوع' : 'Cinematic depth — Parallax + varied cuts' }}</option>
+                                    <option value="news_wipe" @selected(old('motion_preset') === 'news_wipe')>{{ $isAr ? 'أخبار — Pan + Wipe' : 'News — Pan + Wipe' }}</option>
+                                    <option value="hook_focus" @selected(old('motion_preset') === 'hook_focus')>{{ $isAr ? 'تركيز على الهوك — كلمة بكلمة' : 'Hook focus — word by word' }}</option>
+                                    <option value="minimal" @selected(old('motion_preset') === 'minimal')>{{ $isAr ? 'هادئ — بلا حركة خلفية' : 'Minimal — static background' }}</option>
+                                </select>
+                                <p class="mt-1 text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'اختر وصفة جاهزة ثم عدّل أي خيار أدناه. الحركات مطبّقة في ملف التصدير.' : 'Choose a ready preset, then adjust any setting below. Motion is applied to the exported video.' }}</p>
+                            </div>
+
                             <div class="flex items-center justify-between">
                                 <span class="text-xs font-bold text-slate-300">ألوان الكلمات المميزة</span>
                                 <div class="flex items-center gap-2">
@@ -578,13 +669,70 @@
                             </div>
 
                             <div>
-                                <label for="cameraMotion" class="block text-xs font-bold text-slate-300 mb-1.5">حركة الخلفية</label>
-                                <select id="cameraMotion" name="camera_motion" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
-                                    <option value="zoom_in" selected>تقريب هادئ</option>
-                                    <option value="pan">تحريك أفقي</option>
-                                    <option value="static">ثابت</option>
+                                <label for="cameraMotion" class="block text-xs font-bold text-slate-300 mb-1.5">{{ $isAr ? 'حركة الخلفية' : 'Background motion' }}</label>
+                                <select id="cameraMotion" name="camera_motion" onchange="markMotionPresetCustom()" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
+                                    <option value="zoom_in" @selected(old('camera_motion', 'zoom_in') === 'zoom_in')>{{ $isAr ? 'تقريب هادئ' : 'Gentle zoom in' }}</option>
+                                    <option value="pan" @selected(old('camera_motion') === 'pan')>{{ $isAr ? 'تحريك أفقي' : 'Horizontal pan' }}</option>
+                                    <option value="parallax" @selected(old('camera_motion') === 'parallax')>{{ $isAr ? 'عمق Parallax خفيف' : 'Subtle parallax-style depth' }}</option>
+                                    <option value="static" @selected(old('camera_motion') === 'static')>{{ $isAr ? 'ثابت' : 'Static' }}</option>
                                 </select>
                             </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label for="textMotion" class="block text-xs font-bold text-slate-300 mb-1.5">{{ $isAr ? 'دخول النص' : 'Text entrance' }}</label>
+                                    <select id="textMotion" name="text_motion" onchange="markMotionPresetCustom()" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
+                                        <option value="vertical" @selected(old('text_motion', 'vertical') === 'vertical')>{{ $isAr ? 'كشف عمودي هادئ' : 'Soft vertical reveal' }}</option>
+                                        <option value="slide_right" @selected(old('text_motion') === 'slide_right')>{{ $isAr ? 'دخول من اليمين' : 'Enter from right' }}</option>
+                                        <option value="slide_left" @selected(old('text_motion') === 'slide_left')>{{ $isAr ? 'دخول من اليسار' : 'Enter from left' }}</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="sceneTransition" class="block text-xs font-bold text-slate-300 mb-1.5">{{ $isAr ? 'الانتقال بين المشاهد' : 'Scene transitions' }}</label>
+                                    <select id="sceneTransition" name="scene_transition" onchange="markMotionPresetCustom()" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
+                                        <option value="template" @selected(old('scene_transition', 'template') === 'template')>{{ $isAr ? 'متوافق مع القالب' : 'Match the selected template' }}</option>
+                                        <option value="fade" @selected(old('scene_transition') === 'fade')>Fade</option>
+                                        <option value="wipe" @selected(old('scene_transition') === 'wipe')>Wipe</option>
+                                        <option value="slide" @selected(old('scene_transition') === 'slide')>{{ $isAr ? 'انزلاق' : 'Slide' }}</option>
+                                        <option value="varied" @selected(old('scene_transition') === 'varied')>{{ $isAr ? 'متنوعة بالتناوب بين المشاهد' : 'Alternate transitions by scene' }}</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label class="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-900 p-3 text-[11px] text-slate-300">
+                                    <input type="checkbox" id="hookWordByWord" name="hook_word_by_word" value="1" onchange="markMotionPresetCustom()" @checked(old('hook_word_by_word')) class="mt-0.5 h-4 w-4 accent-amber-500">
+                                    <span>{{ $isAr ? 'إظهار الهوك كلمةً بكلمة وإبراز الكلمة الحالية' : 'Reveal the hook word by word and highlight the current word' }}</span>
+                                </label>
+                                <label class="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-900 p-3 text-[11px] text-slate-300">
+                                    <input type="hidden" name="highlight_important" value="0">
+                                    <input type="checkbox" id="highlightImportant" name="highlight_important" value="1" onchange="markMotionPresetCustom()" @checked(old('highlight_important', '1')) class="mt-0.5 h-4 w-4 accent-amber-500">
+                                    <span>{{ $isAr ? 'تمييز الكلمات المهمة بلون التوكيد' : 'Highlight emphasized words with the accent color' }}</span>
+                                </label>
+                            </div>
+
+                            <script>
+                                window.applyMotionPreset = function (name) {
+                                    const presets = {
+                                        subtle_story: { camera: 'zoom_in', text: 'vertical', transition: 'fade', hook: false, highlight: true },
+                                        cinematic_depth: { camera: 'parallax', text: 'slide_left', transition: 'varied', hook: false, highlight: true },
+                                        news_wipe: { camera: 'pan', text: 'slide_right', transition: 'wipe', hook: false, highlight: true },
+                                        hook_focus: { camera: 'zoom_in', text: 'vertical', transition: 'slide', hook: true, highlight: true },
+                                        minimal: { camera: 'static', text: 'vertical', transition: 'fade', hook: false, highlight: false }
+                                    };
+                                    const preset = presets[name];
+                                    if (!preset) return;
+                                    document.getElementById('cameraMotion').value = preset.camera;
+                                    document.getElementById('textMotion').value = preset.text;
+                                    document.getElementById('sceneTransition').value = preset.transition;
+                                    document.getElementById('hookWordByWord').checked = preset.hook;
+                                    document.getElementById('highlightImportant').checked = preset.highlight;
+                                };
+                                window.markMotionPresetCustom = function () {
+                                    const preset = document.getElementById('motionPreset');
+                                    if (preset) preset.value = 'custom';
+                                };
+                            </script>
 
                             <label class="flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3 text-xs text-slate-300">
                                 <input type="checkbox" name="anti_border" value="1" checked class="mt-0.5 h-4 w-4 accent-amber-500">
@@ -660,6 +808,14 @@
                                     <div class="font-bold text-white text-xs">Cinematic Glass</div>
                                     <span class="text-[10px] text-slate-400">زجاجي شفاف</span>
                                 </button>
+                                <button type="button" aria-pressed="false" class="p-4 rounded-xl bg-slate-900 border border-slate-700 text-center hover:border-amber-500" onclick="selectTemplate('quote_card', this)">
+                                    <div class="font-bold text-white text-xs">Quote Card</div>
+                                    <span class="text-[10px] text-slate-400">اقتباس بلا إطار</span>
+                                </button>
+                                <button type="button" aria-pressed="false" class="p-4 rounded-xl bg-slate-900 border border-slate-700 text-center hover:border-amber-500" onclick="selectTemplate('bold_stripe', this)">
+                                    <div class="font-bold text-white text-xs">Bold Stripe</div>
+                                    <span class="text-[10px] text-slate-400">شريط لوني جسور</span>
+                                </button>
                             </div>
                         </div>
 
@@ -678,7 +834,22 @@
             <!-- ================= STEP 6: تقييم الفيديو ================= -->
             <div id="stepContainer6" class="hidden space-y-6">
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                    <div class="lg:col-span-5 studio-card p-6 lg:sticky lg:top-24 space-y-4">
+                    <div class="lg:col-span-5 lg:sticky lg:top-24 space-y-4">
+                        <div class="studio-card p-4 space-y-3">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <h3 class="font-bold text-white text-sm">{{ $isAr ? 'معاينة حقيقية من المحرك' : 'Real engine preview' }}</h3>
+                                    <p class="text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'تُرسم بنفس الخط والتخطيط المستخدم في التصدير، وليست محاكاة HTML.' : 'Rendered with the same font and layout used for export, not an HTML approximation.' }}</p>
+                                </div>
+                                <button type="button" onclick="requestRealPreview()" id="realPreviewBtn" class="flex-shrink-0 rounded-xl bg-amber-500 px-3 py-2 text-[11px] font-black text-slate-950 transition hover:bg-amber-400 disabled:opacity-60">
+                                    {{ $isAr ? 'تحديث المعاينة' : 'Refresh preview' }}
+                                </button>
+                            </div>
+                            <img id="realPreviewImage" alt="" class="hidden mx-auto max-h-[520px] rounded-2xl border border-slate-700 bg-black">
+                            <p id="realPreviewStatus" role="status" aria-live="polite" class="text-[11px] text-slate-400"></p>
+                        </div>
+
+                        <div class="studio-card p-6 space-y-4">
                         <div class="reel-preview-frame rounded-2xl bg-[#030712] p-4 flex flex-col justify-between border border-slate-800 relative">
                             <div class="flex items-center justify-between text-[10px] text-slate-400">
                                 <span>{{ old('handle', '') }}</span>
@@ -697,28 +868,28 @@
                     </div>
 
                     <div class="lg:col-span-7 space-y-5">
-                        <div class="studio-card p-6 border-2 border-slate-800 space-y-1">
-                            <div>
-                                <h3 class="text-lg font-black text-white">راجع النص قبل التصدير</h3>
-                                <p class="text-xs text-slate-400 mt-1">قائمة إرشادية يدوية؛ لا تقيس أداء الفيديو ولا تتحقق من صحة المعلومات تلقائياً.</p>
+                        <div class="studio-card p-6 space-y-4" id="qualityCheckCard">
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <h3 class="text-lg font-black text-white">{{ $isAr ? 'فحص جاهزية قبل التصدير' : 'Pre-export readiness check' }}</h3>
+                                    <p class="mt-1 text-xs leading-relaxed text-slate-400">{{ $isAr ? 'يفحص طول الهوك والنص والوتيرة والإعدادات محلياً. لا يتحقق من الحقائق ولا يتنبأ بأداء المنصات.' : 'Checks hook and script length, pacing and export settings. It does not fact-check or predict platform performance.' }}</p>
+                                </div>
+                                <button type="button" onclick="runWizardQualityCheck()" id="qualityCheckButton" class="rounded-xl bg-amber-500 px-4 py-2 text-xs font-black text-slate-950 hover:bg-amber-400 disabled:opacity-60">{{ $isAr ? 'حلّل الجاهزية' : 'Check readiness' }}</button>
                             </div>
+                            <p id="qualityCheckStatus" role="status" aria-live="polite" class="text-xs text-slate-400">{{ $isAr ? 'سيُعاد الفحص تلقائياً قبل إرسال التصدير.' : 'The check runs again automatically before export is submitted.' }}</p>
+                            <div id="qualityCheckReport" class="hidden space-y-2" aria-live="polite"></div>
                         </div>
 
-                        <div class="studio-card p-6 space-y-3">
-                            <div class="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
-                                <div class="flex items-center gap-2">
-                                    <i class="fa-regular fa-circle text-amber-400"></i>
-                                    <div><span class="font-bold text-white block">راجع وضوح الهوك</span><span class="text-[11px] text-slate-400">هل تظهر الفائدة من أول ثانية؟</span></div>
+                        <div class="studio-card p-6 space-y-4" id="factCheckCard">
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <h3 class="text-lg font-black text-white">{{ $isAr ? 'فحص الحقائق والمخاطر' : 'Fact-check and risk scan' }}</h3>
+                                    <p class="mt-1 text-xs leading-relaxed text-slate-400">{{ $isAr ? 'يفحص الادعاءات بالذكاء الاصطناعي ويحدد ما يحتاج مصدرًا خارجيًا. هذا فحص أولي وليس تحققًا صحفيًا.' : 'Screens claims with AI and flags what needs an external source. This is a pre-check, not journalistic verification.' }}</p>
                                 </div>
-                                <span class="text-amber-400 font-bold">مراجعة يدوية</span>
+                                <button type="button" onclick="runWizardFactCheck()" id="factCheckButton" class="rounded-xl border border-sky-400/40 bg-sky-500/10 px-4 py-2 text-xs font-black text-sky-200 hover:bg-sky-500/20 disabled:opacity-60">{{ $isAr ? 'افحص الحقائق' : 'Fact-check' }}</button>
                             </div>
-                            <div class="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
-                                <div class="flex items-center gap-2">
-                                    <i class="fa-regular fa-circle text-amber-400"></i>
-                                    <div><span class="font-bold text-white block">راجع طول النص</span><span class="text-[11px] text-slate-400">اقرأه بصوت عالٍ ليتناسب مع المدة.</span></div>
-                                </div>
-                                <span class="text-amber-400 font-bold">مراجعة يدوية</span>
-                            </div>
+                            <p id="factCheckStatus" role="status" aria-live="polite" class="text-xs text-slate-400">{{ $isAr ? 'استخدمه قبل التصدير خصوصًا للأخبار والصحة والمال والقانون.' : 'Use it before export, especially for news, health, finance, and legal topics.' }}</p>
+                            <div id="factCheckReport" class="hidden space-y-2" aria-live="polite"></div>
                         </div>
 
                         <!-- رأي الخبير التفاعلي -->
@@ -763,7 +934,22 @@
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                     
                     <!-- Left Column (5 cols): Preview Frame matching Images 2, 3, 4 -->
-                    <div class="lg:col-span-5 studio-card p-6 lg:sticky lg:top-24 space-y-4">
+                    <div class="lg:col-span-5 lg:sticky lg:top-24 space-y-4">
+                        <div class="studio-card p-4 space-y-3">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <h3 class="font-bold text-white text-sm">{{ $isAr ? 'معاينة حقيقية من المحرك' : 'Real engine preview' }}</h3>
+                                    <p class="text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'تُرسم بنفس الخط والتخطيط المستخدم في التصدير، وليست محاكاة HTML.' : 'Rendered with the same font and layout used for export, not an HTML approximation.' }}</p>
+                                </div>
+                                <button type="button" onclick="requestRealPreview()" id="realPreviewBtn" class="flex-shrink-0 rounded-xl bg-amber-500 px-3 py-2 text-[11px] font-black text-slate-950 transition hover:bg-amber-400 disabled:opacity-60">
+                                    {{ $isAr ? 'تحديث المعاينة' : 'Refresh preview' }}
+                                </button>
+                            </div>
+                            <img id="realPreviewImage" alt="" class="hidden mx-auto max-h-[520px] rounded-2xl border border-slate-700 bg-black">
+                            <p id="realPreviewStatus" role="status" aria-live="polite" class="text-[11px] text-slate-400"></p>
+                        </div>
+
+                        <div class="studio-card p-6 space-y-4">
                         <div class="reel-preview-frame rounded-2xl bg-[#030712] bg-cover bg-center p-5 flex flex-col justify-between border border-slate-800 relative overflow-hidden" id="step7PreviewCard">
                             <div class="flex items-center justify-between text-[10px] text-slate-400 z-10">
                                 <span id="s7Handle" dir="ltr">{{ old('handle', '') }}</span>
@@ -840,6 +1026,31 @@
                                 </p>
                             </div>
 
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label for="wizardQuality" class="block text-[11px] font-bold text-slate-300 mb-1.5">{{ $isAr ? 'جودة التصدير' : 'Export quality' }}</label>
+                                    <select id="wizardQuality" name="quality" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
+                                        <option value="1080" selected>1080p — Full HD</option>
+                                        <option value="720">720p — أسرع وأخف</option>
+                                    </select>
+                                </div>
+                                <div class="rounded-xl border border-slate-800 bg-slate-900 p-3 text-[10px] leading-relaxed text-slate-400">
+                                    {{ $isAr ? 'المدة النهائية قد تُمدّ قليلاً إذا احتاج النص وقتاً أكبر للقراءة. يتم ضبط الصوت إلى −14 LUFS تلقائياً.' : 'The final duration may extend slightly when the text needs more reading time. Audio is normalized to −14 LUFS automatically.' }}
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] text-slate-300">
+                                <label class="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2.5 cursor-pointer">
+                                    <input type="hidden" name="captions" value="0">
+                                    <input type="checkbox" name="captions" value="1" checked class="accent-amber-500">
+                                    <span>{{ $isAr ? 'كابشن كلمة بكلمة + ملف SRT' : 'Word-by-word captions + SRT' }}</span>
+                                </label>
+                                <label class="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2.5 cursor-pointer">
+                                    <input type="hidden" name="auto_music" value="0">
+                                    <input type="checkbox" name="auto_music" value="1" checked class="accent-amber-500">
+                                    <span>{{ $isAr ? 'موسيقى خلفية أصلية تلقائية' : 'Original ambient bed' }}</span>
+                                </label>
+                            </div>
+
                             <!-- Big Orange CTA Button matching Image 4 -->
                             <button type="submit" id="renderFinalVideoBtn" aria-describedby="renderLoadingPrompt" class="w-full py-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base transition shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2">
                                 <i class="fa-solid fa-film"></i>
@@ -858,7 +1069,7 @@
                                 <i class="fa-solid fa-volume-high text-amber-400" aria-hidden="true"></i>
                                 <h3>الصوت في ملف التصدير</h3>
                             </div>
-                            <p class="text-xs leading-relaxed text-slate-400">الخلفيات الأصلية المرفقة صامتة. ارفع ملفاً صوتياً تملك حق استخدامه من تبويب الموسيقى لإضافته محلياً، أو اتركه فارغاً للاحتفاظ بصوت فيديو المصدر.</p>
+                            <p class="text-xs leading-relaxed text-slate-400">الخلفيات الأصلية المرفقة صامتة. ارفع ملفاً صوتياً تملك حق استخدامه من تبويب الموسيقى، أو اتركه فارغاً لاستخدام موسيقى خلفية أصلية مولّدة بلا حقوق. تُخفض الموسيقى تلقائياً تحت التعليق ويُضبط الصوت إلى −14 LUFS.</p>
                         </div>
 
                         <!-- Ready Facebook Captions Card matching Image 2 -->
@@ -1050,6 +1261,16 @@
         // Navigation between steps
         function goToStep(step) {
             const previousStep = Number(document.body.dataset.currentStep || 1);
+            const brief = document.getElementById('inputUserPrompt');
+            if (step > previousStep && previousStep === 1 && !brief?.value.trim()) {
+                const status = document.getElementById('wizardStatus');
+                if (status) {
+                    status.textContent = @json($isAr ? 'اكتب وصفاً للفيديو قبل الانتقال إلى الخطوة التالية.' : 'Enter a video brief before continuing to the next step.');
+                    status.classList.remove('hidden');
+                }
+                brief?.focus();
+                return;
+            }
             for (let i = 1; i <= 7; i++) {
                 const c = document.getElementById('stepContainer' + i);
                 const t = document.getElementById('stepTab' + i);
@@ -1066,6 +1287,7 @@
             if (activeT) activeT.classList.add('active');
             document.body.dataset.currentStep = String(step);
             document.body.dataset.stepDirection = step >= previousStep ? 'forward' : 'backward';
+            if (typeof window.persistWizardDraft === 'function') window.persistWizardDraft();
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -1183,6 +1405,25 @@
             });
         }
         updateAspectRatioPreview();
+
+        function toggleGenerationOptions(mode) {
+            const variantOptions = document.getElementById('variantOptions');
+            const batchOptions = document.getElementById('batchOptions');
+            const variantCount = document.getElementById('variantCount');
+            const batchTopics = document.getElementById('batchTopics');
+            const userPrompt = document.getElementById('inputUserPrompt');
+            const showVariants = mode === 'variants';
+            const showBatch = mode === 'batch';
+            variantOptions?.classList.toggle('hidden', !showVariants);
+            batchOptions?.classList.toggle('hidden', !showBatch);
+            if (variantCount) variantCount.disabled = !showVariants;
+            if (batchTopics) {
+                batchTopics.required = showBatch;
+                batchTopics.disabled = !showBatch;
+            }
+            if (userPrompt) userPrompt.required = !showBatch;
+        }
+        toggleGenerationOptions(document.getElementById('generationMode')?.value || 'single');
 
         let wizardSourcePreviewUrl = null;
         function showWizardVideoName(input) {
@@ -1419,10 +1660,135 @@
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok || data.status === 'error') {
-                throw new Error(data.message || 'تعذّر إكمال الطلب. تحقق من الاتصال وحاول مرة أخرى.');
+                const language = document.querySelector('select[name="language"]')?.value || @json($lang ?? 'ar');
+                throw new Error(data.message || (language === 'en' ? 'The request could not be completed. Check your connection and try again.' : 'تعذّر إكمال الطلب. تحقق من الاتصال وحاول مرة أخرى.'));
             }
             showWizardStatus();
             return data;
+        }
+
+        const qualityCopy = @json($qualityCopy);
+
+        async function runWizardQualityCheck() {
+            const button = document.getElementById('qualityCheckButton');
+            const status = document.getElementById('qualityCheckStatus');
+            const reportContainer = document.getElementById('qualityCheckReport');
+            if (!button || !status || !reportContainer) return false;
+
+            button.disabled = true;
+            status.textContent = qualityCopy.checking;
+            try {
+                const payload = {
+                    headline: document.getElementById('hiddenHookHeadline')?.value || document.getElementById('hookHeadline')?.textContent || '',
+                    topic: document.getElementById('inputTopic')?.value || '',
+                    user_prompt: document.getElementById('inputUserPrompt')?.value || '',
+                    line1: document.getElementById('inputLine1')?.value || '',
+                    line2: document.getElementById('inputLine2')?.value || '',
+                    line3: document.getElementById('inputLine3')?.value || '',
+                    duration: document.querySelector('input[name="duration"]:checked')?.value || '10',
+                    aspect_ratio: document.getElementById('wizardAspectRatio')?.value || '9:16',
+                    language: document.getElementById('wizardLanguage')?.value || @json($lang),
+                    manual_content: false,
+                };
+                const data = await postWizardJson(@json(route('reels.quality-check')), payload);
+                const report = data.report;
+                reportContainer.replaceChildren();
+
+                const summary = document.createElement('div');
+                summary.className = 'flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 py-3';
+                const summaryLabel = document.createElement('strong');
+                summaryLabel.className = 'text-xs text-white';
+                summaryLabel.textContent = report.status === 'ready' ? qualityCopy.ready : qualityCopy.review;
+                const score = document.createElement('span');
+                score.className = 'rounded-full bg-amber-500/15 px-3 py-1 text-[11px] font-bold text-amber-300';
+                score.textContent = `${qualityCopy.score}: ${report.readiness_score}/100`;
+                summary.append(summaryLabel, score);
+                reportContainer.appendChild(summary);
+
+                (report.checks || []).forEach(check => {
+                    const row = document.createElement('div');
+                    row.className = 'flex flex-col gap-1 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between';
+                    const textGroup = document.createElement('div');
+                    const label = document.createElement('strong');
+                    label.className = 'block text-xs text-slate-100';
+                    label.textContent = qualityCopy.checks[check.key] || check.key;
+                    const detail = document.createElement('span');
+                    detail.className = 'mt-0.5 block text-[10px] leading-relaxed text-slate-400';
+                    detail.textContent = qualityCopy.details[check.key]?.[check.status] || '';
+                    textGroup.append(label, detail);
+                    const state = document.createElement('span');
+                    state.className = `self-start rounded-full px-2.5 py-1 text-[10px] font-bold ${check.status === 'pass' ? 'bg-emerald-500/10 text-emerald-300' : (check.status === 'warning' ? 'bg-amber-500/10 text-amber-300' : 'bg-sky-500/10 text-sky-300')}`;
+                    state.textContent = qualityCopy.states[check.status] || check.status;
+                    row.append(textGroup, state);
+                    reportContainer.appendChild(row);
+                });
+
+                reportContainer.classList.remove('hidden');
+                status.textContent = @json($isAr ? 'الفحص إرشادي فقط؛ راجع النص بنفسك قبل التصدير.' : 'This is a heuristic check; review the script yourself before export.');
+                return true;
+            } catch (error) {
+                status.textContent = error.message || qualityCopy.failed;
+                return false;
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function runWizardFactCheck() {
+            const button = document.getElementById('factCheckButton');
+            const status = document.getElementById('factCheckStatus');
+            const container = document.getElementById('factCheckReport');
+            if (!button || !status || !container) return false;
+            button.disabled = true;
+            status.textContent = @json($isAr ? 'جارٍ فحص الادعاءات...' : 'Screening claims…');
+            try {
+                const script = [
+                    document.getElementById('inputUserPrompt')?.value || '',
+                    document.getElementById('inputLine1')?.value || '',
+                    document.getElementById('inputLine2')?.value || '',
+                    document.getElementById('inputLine3')?.value || '',
+                ].filter(Boolean).join('\n');
+                const data = await postWizardJson(@json(route('ai.fact-check')), {
+                    headline: document.getElementById('hiddenHookHeadline')?.value || '',
+                    topic: document.getElementById('inputTopic')?.value || '',
+                    script,
+                    language: document.getElementById('wizardLanguage')?.value || @json($lang),
+                });
+                const report = data.report || {};
+                const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]);
+                container.replaceChildren();
+                const tone = report.status === 'ready' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : (report.status === 'high_risk' ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-200');
+                const summary = document.createElement('div');
+                summary.className = `rounded-xl border px-3 py-3 ${tone}`;
+                summary.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2"><strong>${safe(report.status || 'review')}</strong><span class="text-[11px] font-bold">${@json($isAr ? 'الثقة' : 'Confidence')}: ${Number(report.confidence || 0)}/100</span></div><p class="mt-2 text-xs leading-relaxed">${safe(report.summary || '')}</p>`;
+                container.appendChild(summary);
+                (report.risk_flags || []).forEach((flag) => {
+                    const item = document.createElement('div');
+                    item.className = 'rounded-xl border border-rose-500/20 bg-rose-950/30 px-3 py-2 text-xs text-rose-200';
+                    item.textContent = `⚠ ${flag}`;
+                    container.appendChild(item);
+                });
+                (report.claims || []).forEach((claim) => {
+                    const item = document.createElement('div');
+                    item.className = 'rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2.5';
+                    item.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2"><strong class="text-xs text-slate-100">${safe(claim.claim || '')}</strong><span class="rounded-full bg-slate-800 px-2 py-1 text-[10px] font-bold text-sky-200">${safe(claim.verdict || 'uncertain')}</span></div><p class="mt-1 text-[10px] leading-relaxed text-slate-400">${safe(claim.reason || '')}</p>${claim.needs_source ? `<p class="mt-1 text-[10px] font-bold text-amber-300">${@json($isAr ? 'يحتاج مصدرًا خارجيًا' : 'Needs an external source')}</p>` : ''}`;
+                    container.appendChild(item);
+                });
+                if (report.disclaimer) {
+                    const disclaimer = document.createElement('p');
+                    disclaimer.className = 'text-[10px] leading-relaxed text-slate-500';
+                    disclaimer.textContent = report.disclaimer;
+                    container.appendChild(disclaimer);
+                }
+                container.classList.remove('hidden');
+                status.textContent = @json($isAr ? 'راجع كل ادعاء مهم وأضف مصدرًا موثوقًا قبل النشر.' : 'Review every important claim and add a reliable source before publishing.');
+                return true;
+            } catch (error) {
+                status.textContent = error.message || @json($isAr ? 'تعذر فحص الحقائق.' : 'Fact-check failed.');
+                return false;
+            } finally {
+                button.disabled = false;
+            }
         }
 
         // AI Hook Suggestion
@@ -1617,13 +1983,20 @@
 
         // Form Submit
         const wizardForm = document.getElementById('wizardMultiStepForm');
-        wizardForm.addEventListener('submit', function(event) {
+        wizardForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
             if (wizardForm.dataset.submitting === 'true') {
-                event.preventDefault();
+                return;
+            }
+
+            const checked = await runWizardQualityCheck();
+            if (!checked) {
+                document.getElementById('qualityCheckCard')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 return;
             }
 
             wizardForm.dataset.submitting = 'true';
+            window.persistWizardDraft?.();
             const btn = document.getElementById('renderFinalVideoBtn');
             const load = document.getElementById('renderLoadingPrompt');
             if (btn) {
@@ -1632,7 +2005,164 @@
                 btn.classList.add('opacity-60', 'cursor-not-allowed');
             }
             if (load) load.classList.remove('hidden');
+            HTMLFormElement.prototype.submit.call(wizardForm);
         });
+
+        (function initializeWizardDraft() {
+            const draftStatus = document.getElementById('wizardDraftStatus');
+            const clearDraftButton = document.getElementById('clearWizardDraft');
+            const owner = @json(auth()->id() ? (string) auth()->id() : 'guest');
+            const draftKey = `aivideo:wizard-draft:v1:${owner}:{{ $lang }}`;
+            const draftFields = Array.from(wizardForm.elements).filter((field) => {
+                const name = field.name || '';
+                return name && !['_token', 'gemini_keys'].includes(name)
+                    && !/(?:^|[_-])(key|secret|token)(?:$|[_-])/i.test(name)
+                    && !['file', 'submit', 'button', 'reset', 'password'].includes((field.type || '').toLowerCase());
+            });
+            const savedMessage = @json($isAr ? 'تم حفظ المسودة محلياً.' : 'Draft saved locally.');
+            const restoredMessage = @json($isAr ? 'استُعيدت مسودتك المحفوظة. الملفات والمفاتيح المؤقتة تحتاج إلى إدخال من جديد.' : 'Your saved draft was restored. Re-select files and re-enter temporary API keys if needed.');
+
+            function persistDraft() {
+                const draft = {
+                    version: 1,
+                    savedAt: Date.now(),
+                    step: Number(document.body.dataset.currentStep || 1),
+                    fields: draftFields.map((field) => ({
+                        name: field.name,
+                        type: field.type || '',
+                        value: field.value,
+                        checked: Boolean(field.checked),
+                    })),
+                };
+                try {
+                    localStorage.setItem(draftKey, JSON.stringify(draft));
+                    if (draftStatus) draftStatus.textContent = savedMessage;
+                    return true;
+                } catch (error) {
+                    if (draftStatus) draftStatus.textContent = @json($isAr ? 'تعذّر الحفظ المحلي في هذا المتصفح؛ انسخ نصك قبل مغادرة الصفحة.' : 'Local saving is unavailable in this browser; copy your text before leaving.');
+                    return false;
+                }
+            }
+
+            window.persistWizardDraft = persistDraft;
+            let saveTimer;
+            const scheduleSave = () => {
+                window.clearTimeout(saveTimer);
+                saveTimer = window.setTimeout(persistDraft, 350);
+            };
+            wizardForm.addEventListener('input', scheduleSave);
+            wizardForm.addEventListener('change', scheduleSave);
+            clearDraftButton?.addEventListener('click', () => {
+                try { localStorage.removeItem(draftKey); } catch (error) {}
+                if (draftStatus) draftStatus.textContent = @json($isAr ? 'مُسحت المسودة المحفوظة من هذا المتصفح.' : 'The saved draft was cleared from this browser.');
+            });
+
+            try {
+                const raw = localStorage.getItem(draftKey);
+                const draft = raw ? JSON.parse(raw) : null;
+                if (draft?.version === 1 && Date.now() - Number(draft.savedAt || 0) < 30 * 24 * 60 * 60 * 1000) {
+                    draftFields.forEach((field, index) => {
+                        const saved = draft.fields?.[index];
+                        if (!saved || saved.name !== field.name || saved.type !== (field.type || '')) return;
+                        if (['radio', 'checkbox'].includes((field.type || '').toLowerCase())) field.checked = Boolean(saved.checked);
+                        else if (typeof saved.value === 'string') field.value = saved.value;
+                    });
+                    if (typeof updateAspectRatioPreview === 'function') updateAspectRatioPreview();
+                    if (typeof toggleGenerationOptions === 'function') toggleGenerationOptions(document.getElementById('generationMode')?.value || 'single');
+                    if (typeof updateScriptPreview === 'function') updateScriptPreview();
+                    if (typeof updateTimelineLabels === 'function') updateTimelineLabels();
+                    const savedStep = Number(draft.step);
+                    if (Number.isInteger(savedStep) && savedStep >= 1 && savedStep <= 7) goToStep(savedStep);
+                    if (draftStatus) draftStatus.textContent = restoredMessage;
+                } else if (raw) {
+                    localStorage.removeItem(draftKey);
+                }
+            } catch (error) {
+                if (draftStatus) draftStatus.textContent = @json($isAr ? 'تعذّر استعادة المسودة؛ يمكنك متابعة التحرير يدوياً.' : 'The draft could not be restored; you can continue editing manually.');
+            }
+
+            wizardForm.addEventListener('submit', persistDraft);
+        })();
+
+        (function initializeWizardPresets() {
+            const presetSelect = document.getElementById('wizardPresetSelect');
+            const savePresetButton = document.getElementById('saveWizardPreset');
+            const loadPresetButton = document.getElementById('loadWizardPreset');
+            if (!presetSelect || !savePresetButton || !loadPresetButton) return;
+
+            const owner = @json(auth()->id() ? (string) auth()->id() : 'guest');
+            const presetKey = `aivideo:wizard-presets:v1:${owner}:{{ $lang }}`;
+            const fields = Array.from(wizardForm.elements).filter((field) => {
+                const name = field.name || '';
+                return name && !['_token', 'gemini_keys'].includes(name)
+                    && !/(?:^|[_-])(key|secret|token)(?:$|[_-])/i.test(name)
+                    && !['file', 'submit', 'button', 'reset', 'password'].includes((field.type || '').toLowerCase());
+            });
+            const presets = () => {
+                try {
+                    const value = JSON.parse(localStorage.getItem(presetKey) || '[]');
+                    return Array.isArray(value) ? value.filter((item) => item && typeof item.name === 'string' && Array.isArray(item.fields)) : [];
+                } catch (error) {
+                    return [];
+                }
+            };
+            const writePresets = (items) => localStorage.setItem(presetKey, JSON.stringify(items.slice(-8)));
+            const refreshPresetSelect = () => {
+                const selected = presetSelect.value;
+                presetSelect.innerHTML = `<option value="">${@json($isAr ? 'الإعدادات المحفوظة' : 'Saved presets')}</option>`;
+                presets().forEach((preset) => {
+                    const option = document.createElement('option');
+                    option.value = preset.id;
+                    option.textContent = preset.name;
+                    presetSelect.appendChild(option);
+                });
+                presetSelect.value = selected;
+            };
+            const collectFields = () => fields.map((field) => ({
+                name: field.name,
+                type: field.type || '',
+                value: field.value,
+                checked: Boolean(field.checked),
+            }));
+            const applyFields = (savedFields) => {
+                fields.forEach((field) => {
+                    const matches = savedFields.filter((saved) => saved.name === field.name && saved.type === (field.type || ''));
+                    const saved = ['radio', 'checkbox'].includes((field.type || '').toLowerCase())
+                        ? matches.find((item) => item.value === field.value)
+                        : matches[0];
+                    if (!saved) return;
+                    if (['radio', 'checkbox'].includes((field.type || '').toLowerCase())) field.checked = Boolean(saved.checked);
+                    else if (typeof saved.value === 'string') field.value = saved.value;
+                });
+                if (typeof updateAspectRatioPreview === 'function') updateAspectRatioPreview();
+                if (typeof toggleGenerationOptions === 'function') toggleGenerationOptions(document.getElementById('generationMode')?.value || 'single');
+                if (typeof updateScriptPreview === 'function') updateScriptPreview();
+                if (typeof updateTimelineLabels === 'function') updateTimelineLabels();
+                wizardForm.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+
+            savePresetButton.addEventListener('click', () => {
+                const name = window.prompt(@json($isAr ? 'اسم الإعداد المحفوظ:' : 'Preset name:'))?.trim();
+                if (!name) return;
+                const items = presets().filter((preset) => preset.name !== name);
+                items.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, savedAt: Date.now(), fields: collectFields() });
+                try {
+                    writePresets(items);
+                    refreshPresetSelect();
+                    presetSelect.value = items.at(-1).id;
+                } catch (error) {
+                    window.alert(@json($isAr ? 'تعذر حفظ الإعداد في هذا المتصفح.' : 'This browser could not save the preset.'));
+                }
+            });
+
+            loadPresetButton.addEventListener('click', () => {
+                const selected = presets().find((preset) => preset.id === presetSelect.value);
+                if (!selected) return;
+                applyFields(selected.fields);
+            });
+
+            refreshPresetSelect();
+        })();
 
         // The wizard is a shared Blade template. Translate its static labels when
         // opened with ?lang=en so the selected language is consistent throughout.
@@ -1692,6 +2222,25 @@
                 ['قالب اقتراح', 'Suggestion template'],
                 ['اقتراح محلي قابل للتعديل', 'Editable local suggestion'],
                 ['اقترح فكرة من القوالب المحلية', 'Suggest from local templates'],
+                ['فكرة الفيديو', 'Video idea'],
+                ['اعتمد الفكرة', 'Use this idea'],
+                ['جرّب فكرة مختلفة', 'Try another idea'],
+                ['ليش هالفكرة:', 'Why this idea:'],
+                ['الزاوية:', 'Angle:'],
+                ['الهوك', 'Hook'],
+                ['الفكرة المعتمدة:', 'Approved idea:'],
+                ['قالب قابل للتعديل', 'Editable template'],
+                ['اكتب النص بهالهوك', 'Write script from this hook'],
+                ['اقترح عنواناً بديلاً', 'Suggest another headline'],
+                ['عنوان تمهيدي قابل للتعديل؛ تأكد أن الفيديو يجيب عنه بدقة.', 'Editable opening line; make sure the video answers it clearly.'],
+                ['مساحة النص', 'Script workspace'],
+                ['النقطة الأولى', 'Point one'],
+                ['النقطة الثانية', 'Point two'],
+                ['النقطة الثالثة', 'Point three'],
+                ['أضف علامة ترقيم', 'Add punctuation'],
+                ['قصّ إلى 9 كلمات', 'Trim to 9 words'],
+                ['أزل علامات التمييز', 'Remove highlights'],
+                ['المتابعة إلى خطوة التصميم ←', 'Continue to design →'],
                 ['المتابعة إلى معاينة التصميم والتصدير', 'Continue to design preview and export'],
                 ['معاينة تصميم البطاقات', 'Preview card design'],
                 ['Timeline المعاينة', 'Preview timeline'],
@@ -1715,6 +2264,52 @@
                     .replace('سيُنشأ من السكريبت بعد التصدير، أو اختر صيغة مقترحة هنا.', 'Generated from the script after export, or choose a suggested format here.');
             });
             document.title = 'Content Machine - Short Video Studio';
+        }
+
+        async function requestRealPreview() {
+            const button = document.getElementById('realPreviewBtn');
+            const image = document.getElementById('realPreviewImage');
+            const status = document.getElementById('realPreviewStatus');
+            const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const value = (selector) => document.querySelector(selector)?.value || '';
+
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            status.textContent = @json($isAr ? 'جارٍ رسم المعاينة...' : 'Rendering preview...');
+            image.classList.add('hidden');
+
+            const payload = new FormData();
+            payload.append('headline', value('[name="headline"]') || value('[name="hook_headline"]'));
+            payload.append('line1', value('[name="line1"]'));
+            payload.append('line2', value('[name="line2"]'));
+            payload.append('line3', value('[name="line3"]'));
+            payload.append('language', value('#wizardLanguage') || @json($lang));
+            payload.append('template', value('#hiddenTemplate') || 'classic');
+            payload.append('handle', value('#inputPageHandle'));
+            payload.append('accent_color', value('#hiddenAccentColor') || '#fb7185');
+            payload.append('font_scale', value('#fontScaleSlider') || '100');
+            payload.append('quality', value('#wizardQuality') || '1080');
+            payload.append('aspect_ratio', value('#wizardAspectRatio') || '9:16');
+
+            try {
+                const response = await fetch(@json(route('reels.preview')), {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+                    body: payload,
+                });
+                const data = await response.json();
+                if (!response.ok || data.status === 'error') {
+                    throw new Error(data.message || 'preview failed');
+                }
+                image.src = data.url + '?v=' + Date.now();
+                image.classList.remove('hidden');
+                status.textContent = @json($isAr ? 'هذه معاينة حقيقية من نفس محرك التصدير.' : 'This preview comes from the same render engine used for export.');
+            } catch (error) {
+                status.textContent = @json($isAr ? 'تعذّر توليد المعاينة. حاول مرة أخرى.' : 'Could not render the preview. Try again.');
+            } finally {
+                button.disabled = false;
+                button.removeAttribute('aria-busy');
+            }
         }
     </script>
 </body>
