@@ -298,7 +298,7 @@ class ReelRenderer
 
     private function pythonBinary(?string $language = null): string
     {
-        $binary = (string) (config('studio.engine.python_bin') ?: base_path('../venv/bin/python3'));
+        $binary = (string) config('studio.engine.python_bin');
 
         if (! is_file($binary) || ! is_executable($binary)) {
             throw new RenderFailedException(

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\ProviderKeyRing;
+use App\Support\StudioPaths;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -30,10 +31,10 @@ class StudioDoctor extends Command
         }
         $this->check($rows, 'Database', $hasReels, $hasReels ? (string) config('database.default') : 'Run php artisan migrate', $failures);
 
-        $python = (string) (config('studio.engine.python_bin') ?: base_path('../venv/bin/python3'));
+        $python = (string) config('studio.engine.python_bin');
         $this->check($rows, 'Python', is_file($python) && is_executable($python), $python, $failures);
 
-        $script = (string) (config('studio.engine.script') ?: base_path('../python_engine/smart_reels.py'));
+        $script = (string) config('studio.engine.script');
         $this->check($rows, 'Renderer', is_file($script), $script, $failures);
 
         if (is_file($python) && is_executable($python)) {
@@ -52,11 +53,17 @@ class StudioDoctor extends Command
             $this->check($rows, 'Arabic font', is_file($bundledFont), $bundledFont, $failures);
         }
 
-        foreach ([storage_path('app'), storage_path('app/public'), storage_path('app/private')] as $path) {
+        $dataRoot = StudioPaths::root();
+        if (! is_dir($dataRoot)) {
+            @mkdir($dataRoot, 0775, true);
+        }
+        $this->check($rows, 'Data root', is_dir($dataRoot) && is_writable($dataRoot), $dataRoot, $failures);
+
+        foreach ([StudioPaths::videos(), StudioPaths::uploads()] as $path) {
             if (! is_dir($path)) {
                 @mkdir($path, 0755, true);
             }
-            $this->check($rows, 'Writable: '.str_replace(base_path().'/', '', $path), is_writable($path), $path, $failures);
+            $this->check($rows, 'Writable: '.str_replace(StudioPaths::root().'/', '', $path), is_writable($path), $path, $failures);
         }
 
         $queue = (string) config('queue.default');
@@ -68,7 +75,9 @@ class StudioDoctor extends Command
         }
         $this->check($rows, 'Queue', $queue !== '', "{$queue} ({$pending} pending job(s))", $failures);
 
-        $storageRoot = storage_path('app');
+        $this->check($rows, 'Data root', is_dir($dataRoot) && is_writable($dataRoot), $dataRoot, $failures);
+
+        $storageRoot = StudioPaths::videos();
         $freeBytes = @disk_free_space($storageRoot);
         $freeDetails = $freeBytes === false ? 'Could not determine free space' : $this->formatBytes((int) $freeBytes).' free';
         $minimumFreeBytes = (int) config('studio.limits.min_free_space_mb', 1024) * 1024 * 1024;

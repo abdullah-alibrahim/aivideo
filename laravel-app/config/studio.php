@@ -1,8 +1,20 @@
 <?php
 
 return [
+    // User-data root override; empty value uses the per-OS default (StudioPaths).
+    'data_dir' => env('AIVIDEO_DATA_DIR'),
+    'version' => env('STUDIO_VERSION', '1.0.0'),
+    'keys' => [
+        // Commercial builds set STUDIO_ALLOW_ENV_KEYS=0 so keys never come from .env.
+        'allow_env' => (bool) env('STUDIO_ALLOW_ENV_KEYS', true),
+    ],
+    'updates' => [
+        'manifest_url' => (string) env('STUDIO_UPDATE_MANIFEST_URL', ''),
+    ],
     'engine' => [
-        'python_bin' => env('AIVIDEO_PYTHON_BIN') ?: base_path('../venv/bin/python3'),
+        'python_bin' => env('AIVIDEO_PYTHON_BIN') ?: base_path(
+            PHP_OS_FAMILY === 'Windows' ? '../venv/Scripts/python.exe' : '../venv/bin/python3'
+        ),
         'script' => env('AIVIDEO_ENGINE_SCRIPT') ?: base_path('../python_engine/smart_reels.py'),
         'render_timeout_seconds' => max(120, (int) env('STUDIO_RENDER_TIMEOUT_SECONDS', 900)),
         'arabic_font' => env('AIVIDEO_ARABIC_FONT', ''),

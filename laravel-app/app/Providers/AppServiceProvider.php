@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\StudioPaths;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -22,6 +23,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        StudioPaths::ensure();
+
         RateLimiter::for('studio-ai', fn (Request $request) => Limit::perMinute(30)->by($request->ip()));
         RateLimiter::for('studio-render', fn (Request $request) => Limit::perMinute(3)->by($request->ip()));
     }

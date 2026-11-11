@@ -84,8 +84,27 @@ class ReelController extends Controller
             'ar' => $elevenLabsKeys !== [] && filled($this->elevenLabsVoiceId('ar')),
             'en' => $elevenLabsKeys !== [] && filled($this->elevenLabsVoiceId('en')),
         ];
+        $python = (string) config('studio.engine.python_bin');
+        $ffmpeg = false;
+        if (is_file($python) && is_executable($python)) {
+            try {
+                $ffmpeg = (new Process([$python, '-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())']))->run() === 0;
+            } catch (\Throwable) {
+                $ffmpeg = false;
+            }
+        }
+        $storagePath = storage_path('app');
+        $freeBytes = @disk_free_space($storagePath);
+        $readiness = [
+            'gemini' => $this->activeProviderKeys('gemini') !== [],
+            'elevenlabs' => $elevenLabsKeys !== [],
+            'python' => is_file($python) && is_executable($python),
+            'ffmpeg' => $ffmpeg,
+            'storage' => is_writable($storagePath) && ($freeBytes === false || $freeBytes >= 512 * 1024 * 1024),
+            'storage_label' => $freeBytes === false ? 'Unknown' : number_format(((int) $freeBytes) / 1024 / 1024 / 1024, 1).' GB free',
+        ];
 
-        return view('reels.wizard', compact('lang', 'backgrounds', 'voiceoverAvailable'));
+        return view('reels.wizard', compact('lang', 'backgrounds', 'voiceoverAvailable', 'readiness'));
     }
 
     public function show(Reel $reel): RedirectResponse
@@ -116,8 +135,8 @@ class ReelController extends Controller
             'aspect_ratio' => ['nullable', Rule::in(['9:16', '1:1', '16:9'])],
         ]);
 
-        $python = (string) (config('studio.engine.python_bin') ?: base_path('../venv/bin/python3'));
-        $script = (string) (config('studio.engine.script') ?: base_path('../python_engine/smart_reels.py'));
+        $python = (string) config('studio.engine.python_bin');
+        $script = (string) config('studio.engine.script');
 
         if (! is_file($python) || ! is_executable($python) || ! is_file($script)) {
             return response()->json([

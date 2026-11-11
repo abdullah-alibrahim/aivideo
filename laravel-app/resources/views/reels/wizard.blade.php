@@ -260,6 +260,35 @@
             </div>
         </div>
 
+        @php
+            $readinessLabels = $isAr
+                ? ['gemini' => 'Gemini API', 'elevenlabs' => 'ElevenLabs API', 'python' => 'Python engine', 'ffmpeg' => 'FFmpeg', 'storage' => 'التخزين والصلاحيات']
+                : ['gemini' => 'Gemini API', 'elevenlabs' => 'ElevenLabs API', 'python' => 'Python engine', 'ffmpeg' => 'FFmpeg', 'storage' => 'Storage & permissions'];
+            $readyCount = collect(['gemini', 'elevenlabs', 'python', 'ffmpeg', 'storage'])->filter(fn ($key) => (bool) ($readiness[$key] ?? false))->count();
+            $allReady = $readyCount === 5;
+        @endphp
+        <section class="mb-6 rounded-2xl border {{ $allReady ? 'border-emerald-500/30 bg-emerald-950/20' : 'border-amber-500/30 bg-amber-950/15' }} p-4 sm:p-5" aria-labelledby="readinessTitle">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <p class="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">{{ $isAr ? 'جاهزية الاستوديو' : 'Studio readiness' }}</p>
+                    <h2 id="readinessTitle" class="mt-1 text-base font-black text-white">{{ $allReady ? ($isAr ? 'كل شيء جاهز للتوليد' : 'Everything is ready to render') : ($isAr ? 'أكمل الإعداد قبل التوليد' : 'Complete setup before rendering') }}</h2>
+                    <p class="mt-1 text-xs text-slate-400">{{ $readyCount }}/5 {{ $isAr ? 'فحوصات ناجحة' : 'checks passed' }}@if(!empty($readiness['storage_label'])) · {{ $readiness['storage_label'] }}@endif</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <a href="{{ route('settings.provider-keys', ['lang' => $lang ?? 'ar']) }}" class="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] font-bold text-sky-200 hover:bg-sky-500/20"><i class="fa-solid fa-key me-1"></i>{{ $isAr ? 'إعداد المفاتيح' : 'Configure APIs' }}</a>
+                    <button type="button" onclick="window.location.reload()" class="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-[11px] font-bold text-slate-300 hover:border-amber-400 hover:text-white"><i class="fa-solid fa-rotate me-1"></i>{{ $isAr ? 'إعادة الفحص' : 'Recheck' }}</button>
+                </div>
+            </div>
+            <div class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                @foreach($readinessLabels as $key => $label)
+                    @php($passed = (bool) ($readiness[$key] ?? false))
+                    <div class="flex items-center gap-2 rounded-xl border {{ $passed ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-200' : 'border-rose-500/20 bg-rose-500/5 text-rose-200' }} px-3 py-2 text-[11px] font-bold">
+                        <i class="fa-solid {{ $passed ? 'fa-circle-check' : 'fa-circle-xmark' }}"></i><span>{{ $label }}</span>
+                    </div>
+                @endforeach
+            </div>
+        </section>
+
         @if ($errors->any())
             <div class="mb-5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-100" role="alert" tabindex="-1" id="serverValidationErrors">
                 <strong>{{ $isAr ? 'راجع الحقول التالية:' : 'Please review the following:' }}</strong>
