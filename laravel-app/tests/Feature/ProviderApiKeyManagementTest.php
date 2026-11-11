@@ -34,7 +34,7 @@ class ProviderApiKeyManagementTest extends TestCase
         $storedSecret = DB::table('provider_api_keys')->where('id', $firstKey->id)->value('secret');
 
         $this->assertNotSame('AIzaKeyForWorkAccount01', $storedSecret);
-        $this->assertSame('AIzaKeyForWorkAccount01', $firstKey->secret);
+        $this->assertSame('AIzaKeyForWorkAccount01', $firstKey->resolveSecret());
 
         $this->get(route('settings.provider-keys', ['lang' => 'ar']))
             ->assertOk()

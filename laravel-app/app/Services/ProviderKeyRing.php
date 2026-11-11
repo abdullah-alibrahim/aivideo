@@ -14,8 +14,8 @@ class ProviderKeyRing
             ->orderBy('use_count')
             ->orderBy('sort_order')
             ->orderBy('id')
-            ->get(['id', 'secret'])
-            ->map(static fn (ProviderApiKey $key): string => trim((string) $key->secret))
+            ->get()
+            ->map(static fn (ProviderApiKey $key): string => trim($key->resolveSecret()))
             ->filter()
             ->values()
             ->all();
@@ -30,7 +30,7 @@ class ProviderKeyRing
                 ->orderBy('sort_order')
                 ->orderBy('id')
                 ->lockForUpdate()
-                ->get(['id', 'secret', 'use_count']);
+                ->get();
 
             if ($keys->isEmpty()) {
                 return [];
@@ -43,7 +43,7 @@ class ProviderKeyRing
             ])->save();
 
             return $keys
-                ->map(static fn (ProviderApiKey $key): string => trim((string) $key->secret))
+                ->map(static fn (ProviderApiKey $key): string => trim($key->resolveSecret()))
                 ->filter()
                 ->values()
                 ->all();
@@ -55,7 +55,7 @@ class ProviderKeyRing
         $key = ProviderApiKey::query()
             ->where('provider', $provider)
             ->get()
-            ->first(static fn (ProviderApiKey $candidate): bool => hash_equals((string) $candidate->secret, $secret));
+            ->first(static fn (ProviderApiKey $candidate): bool => hash_equals($candidate->resolveSecret(), $secret));
 
         if (! $key) {
             return;
@@ -99,7 +99,7 @@ class ProviderKeyRing
         $key = ProviderApiKey::query()
             ->where('provider', $provider)
             ->get()
-            ->first(static fn (ProviderApiKey $candidate): bool => hash_equals((string) $candidate->secret, $secret));
+            ->first(static fn (ProviderApiKey $candidate): bool => hash_equals($candidate->resolveSecret(), $secret));
 
         $key?->forceFill([
             'health_status' => 'healthy',
@@ -126,14 +126,14 @@ class ProviderKeyRing
         }
 
         foreach ($keys as $key) {
-            $fingerprint = hash('sha256', (string) $key->secret);
+            $fingerprint = hash('sha256', $key->resolveSecret());
 
             if (array_key_exists($fingerprint, $failed)) {
                 $failure = $failed[$fingerprint];
                 $reason = $failure['reason'] ?? ($failure['status'] ? "HTTP {$failure['status']}" : 'Gemini render attempt failed.');
-                $this->recordFailure('gemini', (string) $key->secret, $reason);
+                $this->recordFailure('gemini', $key->resolveSecret(), $reason);
             } elseif ($successFingerprint !== null && hash_equals($fingerprint, $successFingerprint)) {
-                $this->recordSuccess('gemini', (string) $key->secret);
+                $this->recordSuccess('gemini', $key->resolveSecret());
             }
         }
     }

@@ -8,6 +8,11 @@ return [
         // Commercial builds set STUDIO_ALLOW_ENV_KEYS=0 so keys never come from .env.
         'allow_env' => (bool) env('STUDIO_ALLOW_ENV_KEYS', true),
     ],
+    'secrets' => [
+        // "auto" picks Keychain on macOS, Credential Manager on Windows, and the
+        // encrypted-file fallback elsewhere. Override for tests or custom setups.
+        'store' => env('STUDIO_SECRETS_STORE', 'auto'),
+    ],
     'updates' => [
         'manifest_url' => (string) env('STUDIO_UPDATE_MANIFEST_URL', ''),
     ],

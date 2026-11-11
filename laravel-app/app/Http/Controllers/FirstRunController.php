@@ -7,8 +7,10 @@ use App\Services\FirstRunChecker;
 use App\Services\FirstRunFixer;
 use App\Services\ProviderConnectivityTester;
 use App\Services\ProviderKeyRing;
+use App\Services\SecretManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class FirstRunController extends Controller
@@ -66,10 +68,14 @@ class FirstRunController extends Controller
                 ->contains(fn (ProviderApiKey $key): bool => hash_equals((string) $key->secret, $secret));
 
             if (! $exists) {
+                $secretManager = app(SecretManager::class);
+                $ref = $provider.'/'.(string) Str::uuid();
+                $secretManager->write($ref, $secret);
+
                 ProviderApiKey::query()->create([
                     'provider' => $provider,
                     'label' => 'First run',
-                    'secret' => $secret,
+                    'secret_ref' => $ref,
                     'is_active' => true,
                     'sort_order' => ProviderApiKey::query()->where('provider', $provider)->count(),
                 ]);

@@ -206,6 +206,15 @@
                 @endif
             </section>
         @endforeach
+
+        <div class="rounded-2xl border border-rose-900/50 bg-rose-950/20 p-4">
+            <h3 class="text-xs font-black text-rose-200"><i class="fa-solid fa-shield-halved me-1"></i>{{ $isAr ? 'حذف كل الأسرار' : 'Delete all secrets' }}</h3>
+            <p class="mt-1 text-[10px] leading-5 text-rose-200/70">{{ $isAr ? 'يزيل كل مفاتيح Gemini وElevenLabs من مخزن أسرار النظام (Keychain / Credential Manager) ويحذف سجلاتها من قاعدة البيانات. لا يمكن التراجع.' : 'Removes every Gemini and ElevenLabs key from the OS secret store (Keychain / Credential Manager) and clears their records. This cannot be undone.' }}</p>
+            <form method="POST" action="{{ route('settings.provider-keys.purge', ['lang' => $lang]) }}" class="mt-3" onsubmit="return confirm('{{ $isAr ? 'حذف كل الأسرار نهائياً من النظام؟' : 'Permanently delete all secrets from this machine?' }}')">
+                @csrf
+                <button type="submit" class="rounded-lg bg-rose-600 px-4 py-2 text-[10px] font-black text-white transition hover:bg-rose-500">{{ $isAr ? 'حذف كل الأسرار' : 'Delete all secrets' }}</button>
+            </form>
+        </div>
     </div>
 </main>
 </body>

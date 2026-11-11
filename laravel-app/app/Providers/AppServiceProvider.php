@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\SecretManager;
+use App\Services\SecretStore;
 use App\Support\StudioPaths;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -15,7 +17,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->scoped(SecretStore::class, fn () => new (SecretManager::defaultStoreClass()));
+        $this->app->scoped(SecretManager::class);
     }
 
     /**

@@ -17,6 +17,7 @@ Route::middleware('studio.access')->group(function (): void {
     Route::get('/settings/provider-keys', [ProviderApiKeyController::class, 'index'])->name('settings.provider-keys');
     Route::get('/dashboard', [AnalyticsController::class, 'dashboard'])->name('analytics.dashboard');
     Route::post('/settings/provider-keys', [ProviderApiKeyController::class, 'store'])->name('settings.provider-keys.store');
+    Route::post('/settings/provider-keys/purge-secrets', [ProviderApiKeyController::class, 'purgeSecrets'])->name('settings.provider-keys.purge');
     Route::patch('/settings/provider-keys/voice-ids', [ProviderApiKeyController::class, 'updateVoiceIds'])->name('settings.provider-keys.voice-ids');
     Route::patch('/settings/provider-keys/{providerApiKey}', [ProviderApiKeyController::class, 'update'])->name('settings.provider-keys.update');
     Route::post('/settings/provider-keys/{providerApiKey}/test', [ProviderApiKeyController::class, 'test'])->middleware('throttle:10,1')->name('settings.provider-keys.test');

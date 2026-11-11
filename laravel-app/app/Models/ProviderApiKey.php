@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\SecretManager;
 use Illuminate\Database\Eloquent\Model;
 
 class ProviderApiKey extends Model
@@ -10,6 +11,7 @@ class ProviderApiKey extends Model
         'provider',
         'label',
         'secret',
+        'secret_ref',
         'is_active',
         'sort_order',
         'use_count',
@@ -24,6 +26,7 @@ class ProviderApiKey extends Model
 
     protected $hidden = [
         'secret',
+        'secret_ref',
     ];
 
     protected $casts = [
@@ -38,9 +41,33 @@ class ProviderApiKey extends Model
         'cooldown_until' => 'datetime',
     ];
 
+    /**
+     * The usable secret: legacy encrypted DB value when present, otherwise the
+     * OS secret store entry behind secret_ref. Legacy values migrate lazily so
+     * the database stops holding provider secrets.
+     */
+    public function resolveSecret(): string
+    {
+        $legacy = (string) $this->getRawOriginal('secret');
+
+        if ($legacy !== '') {
+            $migrated = app(SecretManager::class)->migrateLegacySecret($this);
+
+            if ($migrated !== null) {
+                $this->refresh();
+
+                return (string) app(SecretManager::class)->read((string) $this->secret_ref);
+            }
+
+            return trim($this->secret);
+        }
+
+        return (string) app(SecretManager::class)->read((string) $this->secret_ref);
+    }
+
     public function getMaskedSecretAttribute(): string
     {
-        $secret = (string) $this->secret;
+        $secret = $this->resolveSecret();
 
         return $secret === '' ? '' : '••••••••'.substr($secret, -4);
     }

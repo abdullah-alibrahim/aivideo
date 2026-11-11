@@ -4,11 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Models\ProviderApiKey;
 use App\Models\ProviderSetting;
+use App\Services\MacKeychainStore;
+use App\Services\SecretManager;
+use App\Services\WindowsCredentialStore;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -63,26 +67,33 @@ class ProviderApiKeyController extends Controller
         $duplicate = ProviderApiKey::query()
             ->where('provider', $validated['provider'])
             ->get()
-            ->contains(fn (ProviderApiKey $key): bool => hash_equals((string) $key->secret, $secret));
+            ->contains(fn (ProviderApiKey $key): bool => hash_equals($key->resolveSecret(), $secret));
 
         if ($duplicate) {
             return redirect()->route('settings.provider-keys', ['lang' => $this->language()])
                 ->withErrors(['secret' => $this->language() === 'ar' ? 'هذا المفتاح مضاف مسبقاً لهذا المزود.' : 'This key is already saved for this provider.']);
         }
 
+        $secretManager = app(SecretManager::class);
+        $ref = $validated['provider'].'/'.(string) Str::uuid();
+        $secretManager->write($ref, $secret);
+
         $nextOrder = ((int) ProviderApiKey::query()->where('provider', $validated['provider'])->max('sort_order')) + 1;
         ProviderApiKey::query()->create([
             'provider' => $validated['provider'],
             'label' => trim((string) ($validated['label'] ?? '')) ?: null,
-            'secret' => $secret,
+            'secret_ref' => $ref,
             'is_active' => true,
             'sort_order' => $nextOrder,
         ]);
 
         $providerName = $validated['provider'] === 'gemini' ? 'Gemini' : 'ElevenLabs';
+        $storeName = $secretManager->store() instanceof MacKeychainStore
+            ? 'macOS Keychain'
+            : ($secretManager->store() instanceof WindowsCredentialStore ? 'Windows Credential Manager' : 'المخزن المشفر المحلي');
         $message = $this->language() === 'ar'
-            ? 'تمت إضافة مفتاح '.$providerName.' وتخزينه مشفراً.'
-            : $providerName.' key added and encrypted at rest.';
+            ? 'تمت إضافة مفتاح '.$providerName.' وتخزينه في '.$storeName.'.'
+            : $providerName.' key added and stored in '.$storeName.'.';
 
         return redirect()->route('settings.provider-keys', ['lang' => $this->language()])->with('success', $message);
     }
@@ -111,14 +122,14 @@ class ProviderApiKeyController extends Controller
                 'gemini' => Http::acceptJson()
                     ->connectTimeout(3)
                     ->timeout(10)
-                    ->post('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='.urlencode((string) $providerApiKey->secret), [
+                    ->post('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='.urlencode($providerApiKey->resolveSecret()), [
                         'contents' => [['parts' => [['text' => 'Reply with the single word OK.']]]],
                         'generationConfig' => ['temperature' => 0, 'maxOutputTokens' => 4],
                     ]),
                 'elevenlabs' => Http::acceptJson()
                     ->connectTimeout(3)
                     ->timeout(10)
-                    ->withHeaders(['xi-api-key' => (string) $providerApiKey->secret])
+                    ->withHeaders(['xi-api-key' => $providerApiKey->resolveSecret()])
                     ->get('https://api.elevenlabs.io/v1/user'),
                 default => null,
             };
@@ -230,9 +241,29 @@ class ProviderApiKeyController extends Controller
 
     public function destroy(ProviderApiKey $providerApiKey): RedirectResponse
     {
+        if (filled($providerApiKey->secret_ref)) {
+            app(SecretManager::class)->delete((string) $providerApiKey->secret_ref);
+        }
+
         $providerApiKey->delete();
 
-        $message = $this->language() === 'ar' ? 'تم حذف المفتاح.' : 'Key deleted.';
+        $message = $this->language() === 'ar' ? 'تم حذف المفتاح من المخزن.' : 'Key deleted from the secret store.';
+
+        return redirect()->route('settings.provider-keys', ['lang' => $this->language()])->with('success', $message);
+    }
+
+    /**
+     * Delete every provider secret: the OS secret store entries and their
+     * database records. Nothing else (settings, reels, data) is touched.
+     */
+    public function purgeSecrets(Request $request): RedirectResponse
+    {
+        $deleted = app(SecretManager::class)->deleteAll();
+        ProviderApiKey::query()->delete();
+
+        $message = $this->language() === 'ar'
+            ? "تم حذف {$deleted} سراً من مخزن النظام وإزالة سجلات المفاتيح."
+            : "{$deleted} secret(s) removed from the OS store and key records cleared.";
 
         return redirect()->route('settings.provider-keys', ['lang' => $this->language()])->with('success', $message);
     }
