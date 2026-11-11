@@ -1,9 +1,15 @@
 <?php
 
 use App\Http\Controllers\AnalyticsController;
+use App\Http\Controllers\FirstRunController;
 use App\Http\Controllers\ProviderApiKeyController;
 use App\Http\Controllers\ReelController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/first-run', [FirstRunController::class, 'index'])->name('first-run');
+Route::get('/api/first-run/check', [FirstRunController::class, 'check'])->name('first-run.check');
+Route::post('/api/first-run/fix', [FirstRunController::class, 'fix'])->middleware('throttle:studio-render')->name('first-run.fix');
+Route::post('/api/first-run/keys', [FirstRunController::class, 'storeKeys'])->middleware('throttle:studio-ai')->name('first-run.keys');
 
 Route::get('/', [ReelController::class, 'index'])->name('reels.index');
 Route::get('/wizard', [ReelController::class, 'wizard'])->name('reels.wizard');
