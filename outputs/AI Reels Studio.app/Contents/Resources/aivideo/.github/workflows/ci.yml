@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  laravel:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    defaults:
+      run:
+        working-directory: laravel-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, sqlite3, pdo_sqlite
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: laravel-app/package-lock.json
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: cp .env.example .env && php artisan key:generate
+      - run: touch database/database.sqlite
+      - run: php artisan migrate --force
+      - run: npm ci
+      - run: npm run build
+      - run: vendor/bin/pint --test --format agent
+      - run: php artisan test --compact
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.lock.txt
+      - run: python -m unittest python_engine/test_smart_reels.py -v
+      - run: python - <<'PY'
+          import ast
+          from pathlib import Path
+          ast.parse(Path('python_engine/smart_reels.py').read_text())
+        shell: bash

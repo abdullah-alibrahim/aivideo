@@ -10,6 +10,7 @@ use App\Services\FactCheckService;
 use App\Services\GeminiContentService;
 use App\Services\ProviderKeyRing;
 use App\Services\ReelQualityAnalyzer;
+use App\Support\StudioPaths;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -93,7 +94,7 @@ class ReelController extends Controller
                 $ffmpeg = false;
             }
         }
-        $storagePath = storage_path('app');
+        $storagePath = StudioPaths::videos();
         $freeBytes = @disk_free_space($storagePath);
         $readiness = [
             'gemini' => $this->activeProviderKeys('gemini') !== [],
@@ -153,7 +154,7 @@ class ReelController extends Controller
         }
 
         $relativePath = 'previews/'.Str::uuid().'.png';
-        $absolutePath = storage_path('app/public/'.$relativePath);
+        $absolutePath = StudioPaths::videos().'/'.$relativePath;
         @mkdir(dirname($absolutePath), 0755, true);
 
         $headline = trim((string) ($validated['headline'] ?? ''));
@@ -851,7 +852,7 @@ class ReelController extends Controller
                 ->with('error', $language === 'en' ? 'ZIP export is unavailable because the PHP ZIP extension is missing.' : 'تصدير ZIP غير متاح لأن إضافة ZIP في PHP غير مثبتة.');
         }
 
-        $temporaryDirectory = storage_path('app/tmp');
+        $temporaryDirectory = StudioPaths::tmp();
         if (! is_dir($temporaryDirectory) && ! @mkdir($temporaryDirectory, 0755, true) && ! is_dir($temporaryDirectory)) {
             abort(500, 'Could not prepare a temporary ZIP location.');
         }
@@ -1253,7 +1254,7 @@ class ReelController extends Controller
 
     private function backgroundCatalog(): array
     {
-        $directory = storage_path('app/public/backgrounds');
+        $directory = StudioPaths::backgrounds();
 
         return array_values(array_filter(array_map(function (array $background) use ($directory) {
             $isPublicAsset = ($background['asset_directory'] ?? 'storage') === 'public';

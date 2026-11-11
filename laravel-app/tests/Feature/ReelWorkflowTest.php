@@ -97,7 +97,7 @@ class ReelWorkflowTest extends TestCase
         return collect(config('reel-backgrounds', []))->filter(function (array $background): bool {
             $directory = ($background['asset_directory'] ?? 'storage') === 'public'
                 ? public_path('backgrounds')
-                : storage_path('app/public/backgrounds');
+                : \App\Support\StudioPaths::backgrounds();
 
             return is_file($directory.'/'.$background['file']) && is_file($directory.'/'.$background['poster']);
         })->count();

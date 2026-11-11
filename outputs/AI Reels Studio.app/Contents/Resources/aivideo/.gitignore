@@ -1,0 +1,35 @@
+# Local secrets and generated artifacts
+.env
+.env.*
+!.env.example
+backups/
+.work/
+laravel-app/storage/app/input_videos/
+laravel-app/storage/app/bg_music/
+laravel-app/storage/app/public/reels/
+laravel-app/storage/logs/
+
+# Python environment and caches
+venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editor / OS / agent scratch files
+.DS_Store
+.manus*
+*.tmp
+
+# Local database and generated media (back up separately)
+laravel-app/database/*.sqlite
+laravel-app/storage/app/public/backgrounds/
+*.mp4
+
+# Build output is generated
+laravel-app/public/build/
+
+# Generated poster, subtitle, and preview media
+laravel-app/storage/app/public/thumbnails/
+laravel-app/storage/app/public/subtitles/
+laravel-app/storage/app/public/previews/
+python_engine/storage/music/

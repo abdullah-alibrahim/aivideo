@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\RenderFailedException;
 use App\Models\ProviderSetting;
 use App\Models\Reel;
+use App\Support\StudioPaths;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -330,12 +331,12 @@ class ReelRenderer
 
     private function progressFile(Reel $reel): string
     {
-        return storage_path('app/private/render-progress/'.$reel->id.'.json');
+        return StudioPaths::progress().'/'.$reel->id.'.json';
     }
 
     private function ensureProgressDirectory(): void
     {
-        $directory = storage_path('app/private/render-progress');
+        $directory = StudioPaths::progress();
 
         if (! is_dir($directory)) {
             mkdir($directory, 0755, true);

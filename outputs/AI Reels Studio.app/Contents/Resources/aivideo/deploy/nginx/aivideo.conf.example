@@ -1,0 +1,42 @@
+# Example server block. Put TLS termination in front of Laravel before exposing it publicly.
+# Replace the domain, paths, PHP socket, and certificate paths.
+
+server {
+    listen 80;
+    server_name reels.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name reels.example.com;
+
+    root /srv/aivideo/laravel-app/public;
+    index index.php;
+
+    ssl_certificate /etc/letsencrypt/live/reels.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/reels.example.com/privkey.pem;
+
+    client_max_body_size 120m;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    location ^~ /storage/ {
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+    }
+
+    location ~ /\.(?!well-known).* {
+        deny all;
+    }
+}

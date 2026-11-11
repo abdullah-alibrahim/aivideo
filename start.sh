@@ -32,6 +32,9 @@ echo "Scheduler:       running in the background"
 echo "Press Ctrl+C to stop the server, worker, and scheduler."
 echo "=================================================="
 
+# One-time, idempotent: move legacy database/media into the user-data root.
+php artisan studio:migrate-data --no-interaction >/dev/null 2>&1 || true
+
 php artisan migrate --force >/dev/null
 
 # Renders run in a queue worker so web requests stay responsive.
