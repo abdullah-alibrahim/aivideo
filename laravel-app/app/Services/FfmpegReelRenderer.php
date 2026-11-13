@@ -110,6 +110,17 @@ class FfmpegReelRenderer implements RenderEngine
             $subtitleTemporary = $workDirectory.'/captions.srt';
             $this->writeSubtitles($subtitleTemporary, $points, (float) ($reel->duration ?: 10));
 
+            // Generate ASS subtitle file using AssOverlayBuilder for proper Arabic text rendering
+            $assTemporary = $workDirectory.'/captions.ass';
+            $assBuilder = new AssOverlayBuilder();
+            $assContent = $assBuilder->build([
+                'headline' => $content['headline'],
+                'points'   => $points,
+                'cta'      => $content['cta'],
+                'handle'   => trim((string) $reel->handle),
+            ], $options, 1080, 1920, (float) ($reel->duration ?: 10));
+            file_put_contents($assTemporary, $assContent);
+
             $voiceTemporary = null;
             if (! empty($options['voiceover'])) {
                 $voiceTemporary = $workDirectory.'/voiceover.mp3';

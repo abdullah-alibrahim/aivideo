@@ -19,7 +19,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>ماكينة المحتوى - استوديو تركيب الفيديوهات القصيرة</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
         body {
@@ -534,7 +535,8 @@
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                     <!-- Live preview card (left 5 cols) -->
                     <div class="lg:col-span-5 studio-card p-6 lg:sticky lg:top-24 space-y-4">
-                            <div class="reel-preview-frame rounded-2xl bg-[#030712] bg-cover bg-center flex flex-col justify-between border border-slate-800 relative overflow-hidden" id="step4PreviewBox">
+                            <div class="reel-preview-frame rounded-2xl bg-slate-900 overflow-hidden" id="step4PreviewBox">
+      <img src="https://picsum.photos/seed/reel-step4/400/600" alt="Reel preview" class="w-full h-full object-cover" />
                                 <div class="flex items-center justify-between text-[10px] text-slate-400">
                                     <span>{{ old('handle', '') }}</span>
                                     <span class="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">مساحة النص</span>
@@ -979,7 +981,8 @@
                         </div>
 
                         <div class="studio-card p-6 space-y-4">
-                        <div class="reel-preview-frame rounded-2xl bg-[#030712] bg-cover bg-center p-5 flex flex-col justify-between border border-slate-800 relative overflow-hidden" id="step7PreviewCard">
+                        <div class="reel-preview-frame rounded-2xl bg-slate-900 overflow-hidden" id="step7PreviewCard">
+      <img src="https://picsum.photos/seed/reel-step7/800/1080" alt="Full reel" class="w-full h-64 object-cover" />
                             <div class="flex items-center justify-between text-[10px] text-slate-400 z-10">
                                 <span id="s7Handle" dir="ltr">{{ old('handle', '') }}</span>
                                 <span class="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-bold">مساحة النص</span>
@@ -2341,5 +2344,63 @@
             }
         }
     </script>
+</body>
+</html>
+
+<!-- Framer Motion Integration -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/framer-motion/11.5.4/framer-motion.min.js" integrity="sha512-4u6ZbK99knJxk6OvkNl6WkrhP8V0mXJmBbdV7f2n9XQSZdR2+Kfu8mLjn3+DfIREoNMlXsZdVwNdcA4wgJ8Ifg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.css" />
+
+<script>
+    // Initialize Framer Motion for step transitions
+    document.addEventListener('DOMContentLoaded', function() {
+        // Animate step cards on enter
+        const stepCards = document.querySelectorAll('.studio-card');
+        stepCards.forEach((card, index) => {
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(20px)';
+            card.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+            
+            // Observe and animate when visible
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.style.opacity = '1';
+                        entry.target.style.transform = 'translateY(0)';
+                    }
+                });
+            });
+            observer.observe(card);
+        });
+        
+        // Animate step tab buttons on hover
+        const stepTabs = document.querySelectorAll('.step-tab-btn');
+        stepTabs.forEach((tab, index) => {
+            tab.style.transition = 'all 0.3s ease';
+            tab.addEventListener('mouseenter', () => {
+                tab.style.transform = 'translateX(4px)';
+            });
+            tab.addEventListener('mouseleave', () => {
+                tab.style.transform = 'translateX(0)';
+            });
+        });
+    });
+</script>
+
+<!-- GSAP Initialization for Video Effects -->
+<script>
+    // GSAP basic setup for potential video effect controls
+    gsap.registerPlugin({});
+    
+    // Example: Progress bar animation
+    function animateProgress(current, max) {
+        gsap.to('.progress-bar', {
+            width: `${(current / max) * 100}%`,
+            duration: 0.5,
+            ease: 'power2.out'
+        });
+    }
+</script>
 </body>
 </html>

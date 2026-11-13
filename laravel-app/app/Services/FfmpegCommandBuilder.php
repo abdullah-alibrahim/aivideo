@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Reel;
+use App\Services\AssOverlayBuilder;
 
 class FfmpegCommandBuilder
 {
@@ -115,61 +116,41 @@ class FfmpegCommandBuilder
             $font = base_path('../python_engine/fonts/NotoKufiArabic.ttf');
         }
         $fontScale = max(80, min(130, (int) ($options['font_scale'] ?? 100)));
-        $handlePath = $textFiles['handle'] ?? null;
-        if (is_string($handlePath) && $handlePath !== '') {
-            $handleFilter = 'drawtext=fontfile='.$this->filterValue($font)
-                .':textfile='.$this->filterValue($handlePath)
-                .':expansion=none:text_shaping=1:fontcolor=white:fontsize='.$this->fontSize($height, $fontScale, 0.024)
-                .':box=1:boxcolor=black@0.35:boxborderw=12:x=(w-text_w)/2:y=h*0.09';
-            $filterParts[] = '['.$base.']'.$handleFilter.'[branded]';
-            $base = 'branded';
+
+        // Generate ASS subtitle file using AssOverlayBuilder for proper Arabic text rendering
+        // Derive ASS path from the subtitlePath parameter (which is an SRT file in the work directory)
+        $assPath = $subtitlePath !== null ? str_replace('.srt', '.ass', $subtitlePath) : null;
+        if ($assPath !== null) {
+            $assDir = dirname($assPath);
+            if (! is_dir($assDir)) {
+                @mkdir($assDir, 0755, true);
+            }
+            $assBuilder = new AssOverlayBuilder();
+            $assContent = $assBuilder->build([
+                'headline' => trim((string) ($options['headline'] ?? $textFiles['headline'] ?? '')),
+                'points'   => is_array($textFiles['points'] ?? []) ? array_values($textFiles['points']) : [],
+                'cta'      => trim((string) ($textFiles['cta'] ?? $options['cta'] ?? '')),
+                'handle'   => trim((string) ($textFiles['handle'] ?? $options['handle'] ?? '')),
+            ], $options, $width, $height, $duration);
+            file_put_contents($assPath, $assContent);
         }
 
+        // Use subtitles filter with ASS file for headline, points, CTA, and handle
+        // This replaces all drawtext filters with proper word wrapping, Arabic support, and styling
+        if ($assPath !== null && is_file($assPath)) {
+            $filterParts[] = '['.$base.']subtitles=filename='.$this->filterValue($assPath).
+                ':force_style="FontName='.$font.',FontSize='.$this->fontSize($height, $fontScale, 0.052).',Outline=2,Shadow=0,Alignment=2,MarginV=40"'.
+                '[headlined]';
+            $base = 'headlined';
+        }
+
+        // Captions subtitles filter (existing functionality)
         if ($subtitlePath !== null && (bool) ($options['captions'] ?? true)) {
-            $filterParts[] = '['.$base.']subtitles=filename='.$this->filterValue($subtitlePath).':force_style='.$this->filterValue('FontName=Noto Kufi Arabic,FontSize=26,Outline=2,Shadow=0,Alignment=2,MarginV=100').'[subtitled]';
+            $filterParts[] = '['.$base.']subtitles=filename='.$this->filterValue($subtitlePath).
+                ':force_style='.$this->filterValue('FontName=Noto Kufi Arabic,FontSize=26,Outline=2,Shadow=0,Alignment=2,MarginV=100').'[subtitled]';
             $base = 'subtitled';
         }
 
-        $headlinePath = $textFiles['headline'] ?? null;
-        if (is_string($headlinePath) && $headlinePath !== '') {
-            $headline = 'drawtext=fontfile='.$this->filterValue($font)
-                .':textfile='.$this->filterValue($headlinePath)
-                .':expansion=none:text_shaping=1:fontcolor=white:fontsize='.$this->fontSize($height, $fontScale, 0.052)
-                .':line_spacing=12:box=1:boxcolor=black@0.48:boxborderw=28:x=(w-text_w)/2:y=h*0.38';
-            $filterParts[] = '['.$base.']'.$headline.'[headline]';
-            $base = 'headline';
-        }
-
-        foreach (array_values((array) ($textFiles['points'] ?? [])) as $index => $path) {
-            if (! is_string($path) || $path === '') {
-                continue;
-            }
-            $start = $duration * $index / max(1, count((array) ($textFiles['points'] ?? [])));
-            $end = $duration * ($index + 1) / max(1, count((array) ($textFiles['points'] ?? [])));
-            $motion = $this->textMotion((string) ($options['text_motion'] ?? 'vertical'));
-            $x = match ($motion) {
-                'slide_left' => 'w*0.14+(w-text_w)*min(1\\,t/'.$this->number(max(0.1, $end - $start)).')',
-                'slide_right' => 'w*0.86-(w-text_w)*min(1\\,t/'.$this->number(max(0.1, $end - $start)).')',
-                default => '(w-text_w)/2',
-            };
-            $point = 'drawtext=fontfile='.$this->filterValue($font)
-                .':textfile='.$this->filterValue($path)
-                .':expansion=none:text_shaping=1:fontcolor=white:fontsize='.$this->fontSize($height, $fontScale, 0.037)
-                .':line_spacing=10:box=1:boxcolor='.$accent.'@0.88:boxborderw=24:x='.$x.':y=h*0.52'
-                .":enable='between(t,".$this->number($start).','.$this->number($end).")'";
-            $filterParts[] = '['.$base.']'.$point.'[point'.$index.']';
-            $base = 'point'.$index;
-        }
-        $ctaPath = $textFiles['cta'] ?? null;
-        if (is_string($ctaPath) && $ctaPath !== '') {
-            $ctaFilter = 'drawtext=fontfile='.$this->filterValue($font)
-                .':textfile='.$this->filterValue($ctaPath)
-                .':expansion=none:text_shaping=1:fontcolor=white:fontsize='.$this->fontSize($height, $fontScale, 0.034)
-                .':box=1:boxcolor='.$accent.'@0.88:boxborderw=22:x=(w-text_w)/2:y=h*0.78'
-                .":enable='between(t,".$this->number(max(0, $duration - 1.8)).','.$this->number($duration).")'";
-            $filterParts[] = '['.$base.']'.$ctaFilter.'[cta]';
-            $base = 'cta';
-        }
         $filterParts[] = '['.$base.']format=yuv420p[vout]';
 
         $audioLabels = [];
@@ -227,22 +208,40 @@ class FfmpegCommandBuilder
         if ($font === '') {
             $font = base_path('../python_engine/fonts/NotoKufiArabic.ttf');
         }
+        $fontScale = max(80, min(130, (int) ($options['font_scale'] ?? 100)));
+
+        // Generate ASS subtitle file for preview using AssOverlayBuilder
+        $assBuilder = new AssOverlayBuilder();
+        $assContent = $assBuilder->build([
+            'headline' => trim((string) ($options['headline'] ?? $textFiles['headline'] ?? '')),
+            'points'   => is_array($textFiles['points'] ?? []) ? array_values($textFiles['points']) : [],
+            'cta'      => trim((string) ($textFiles['cta'] ?? $options['cta'] ?? '')),
+            'handle'   => trim((string) ($textFiles['handle'] ?? $options['handle'] ?? '')),
+        ], $options, $width, $height, 10.0);
+
+        $assPath = tempnam(sys_get_temp_dir(), 'ass_').'.ass';
+        file_put_contents($assPath, $assContent);
+
+        // Use subtitles filter with ASS file instead of drawtext
         $filters = [];
-        if (is_string($textFiles['headline'] ?? null)) {
-            $filters[] = 'drawtext=fontfile='.$this->filterValue($font).':textfile='.$this->filterValue($textFiles['headline'])
-                .':expansion=none:text_shaping=1:fontcolor=white:fontsize='.$this->fontSize($height, (int) ($options['font_scale'] ?? 100), 0.06)
-                .':box=1:boxcolor=black@0.5:boxborderw=30:x=(w-text_w)/2:y=h*0.36';
+        // All text now comes from the ASS file via subtitles filter
+        // We still need to track the base filter graph state
+        $base = 'joined';
+
+        if ($assPath !== null && is_file($assPath)) {
+            $filters[] = '['.$base.']subtitles=filename='.$this->filterValue($assPath).
+                ':force_style="FontName='.$font.',FontSize='.$this->fontSize($height, $fontScale, 0.052).',Outline=2,Shadow=0,Alignment=2,MarginV=40"'.
+                '[headlined]';
+            $base = 'headlined';
         }
-        if (is_string($textFiles['handle'] ?? null) && $textFiles['handle'] !== '') {
-            $filters[] = 'drawtext=fontfile='.$this->filterValue($font).':textfile='.$this->filterValue($textFiles['handle'])
-                .':expansion=none:text_shaping=1:fontcolor=white:fontsize='.$this->fontSize($height, (int) ($options['font_scale'] ?? 100), 0.025)
-                .':box=1:boxcolor=black@0.35:boxborderw=12:x=(w-text_w)/2:y=h*0.08';
-        }
-        foreach (array_values((array) ($textFiles['points'] ?? [])) as $index => $path) {
-            if (is_string($path)) {
-                $filters[] = 'drawtext=fontfile='.$this->filterValue($font).':textfile='.$this->filterValue($path)
-                    .':expansion=none:text_shaping=1:fontcolor=white:fontsize='.$this->fontSize($height, (int) ($options['font_scale'] ?? 100), 0.04)
-                    .':box=1:boxcolor='.$this->accentColor((string) ($options['accent_color'] ?? '#fb7185')).'@0.85:boxborderw=20:x=(w-text_w)/2:y=h*'.(0.54 + $index * 0.09);
+
+        // Captions aren't typically needed for preview, but if enabled, add subtitles
+        if ((bool) ($options['captions'] ?? true)) {
+            $subtitlePath = $options['_subtitle_path'] ?? null;
+            if ($subtitlePath !== null && is_file($subtitlePath)) {
+                $filters[] = '['.$base.']subtitles=filename='.$this->filterValue($subtitlePath).
+                    ':force_style='.$this->filterValue('FontName=Noto Kufi Arabic,FontSize=26,Outline=2,Shadow=0,Alignment=2,MarginV=100').'[subtitled]';
+                $base = 'subtitled';
             }
         }
 
