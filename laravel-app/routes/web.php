@@ -12,6 +12,7 @@ use App\Http\Controllers\StudioInvitationController;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [LandingPageController::class, 'index'])->name('landing');
@@ -89,33 +90,43 @@ Route::middleware('auth')->group(function (): void {
     });
 });
 
-// Cron endpoint - process pending queue jobs directly (Hostinger shared hosting)
-// exec/proc_open disabled in web context; use Artisan::call() instead
+// Cron endpoint - process pending queue jobs directly (Hostinger shared hosting).
+// Rendering needs a process-spawning function. When the web PHP pool disables
+// them the jobs stay queued for the CLI worker instead of being marked failed.
 Route::get('/cron-run/{token}', function (string $token) {
     if ($token !== env('CRON_SECRET', 'aivideo_cron_2024_secure')) {
         abort(403);
     }
-    // Check for pending jobs and process them
-    $pending = \Illuminate\Support\Facades\DB::table('jobs')
+
+    $pending = DB::table('jobs')
         ->where('queue', 'default')
         ->whereNull('reserved_at')
         ->count();
-    
+
+    if (! function_exists('proc_open')) {
+        return response()->json([
+            'status' => 'needs_cli_worker',
+            'pending' => $pending,
+            'triggered' => false,
+            'message' => 'The web PHP pool disables proc_open; run the queue worker from cron with Alt-PHP 8.4.',
+            'time' => now()->toISOString(),
+        ]);
+    }
+
     $processed = 0;
     if ($pending > 0) {
-        // Run the queue worker synchronously (processes one batch)
         try {
-            \Artisan::call('queue:work', [
+            Artisan::call('queue:work', [
                 '--stop-when-empty' => true,
                 '--tries' => 2,
                 '--max-time' => 110,
             ]);
             $processed = $pending;
-        } catch (\Throwable $e) {
-            \Log::error('Cron queue:work failed', ['error' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            Log::error('Cron queue:work failed', ['error' => $e->getMessage()]);
         }
     }
-    
+
     return response()->json([
         'status' => 'ok',
         'pending' => $pending,

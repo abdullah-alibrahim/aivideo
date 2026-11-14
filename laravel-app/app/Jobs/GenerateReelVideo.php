@@ -4,7 +4,7 @@ namespace App\Jobs;
 
 use App\Exceptions\RenderFailedException;
 use App\Models\Reel;
-use App\Services\ReelRenderer;
+use App\Services\RenderEngine;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Storage;
@@ -33,7 +33,7 @@ class GenerateReelVideo implements ShouldQueue
         public string $outputRelativePath,
     ) {}
 
-    public function handle(ReelRenderer $renderer): void
+    public function handle(RenderEngine $renderer): void
     {
         $reel = $this->reel->fresh();
 

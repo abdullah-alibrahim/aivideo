@@ -1,0 +1,235 @@
+<?php
+
+namespace App\Services;
+
+use App\Exceptions\RenderFailedException;
+use App\Models\Reel;
+use RuntimeException;
+
+class ReelContentGenerator
+{
+    public function __construct(private readonly GeminiContentService $gemini) {}
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array{script:string,headline:string,points:list<string>,cta:string,caption:string,hashtags:string,content_source:string,ai_model:string|null}
+     */
+    public function generate(Reel $reel, array $options): array
+    {
+        $language = (string) ($reel->language ?: 'en');
+        $customHeadline = trim((string) ($options['custom_headline'] ?? ''));
+        $customPoints = $this->normalizeStrings((array) ($options['custom_points'] ?? []));
+        $caption = trim((string) ($options['caption'] ?? ''));
+        $hashtags = trim((string) ($options['hashtags'] ?? ''));
+
+        if ((bool) ($options['manual_content'] ?? false)) {
+            if ($customHeadline === '' || $customPoints === []) {
+                throw $this->failure('invalid_result', false, $language);
+            }
+
+            return $this->result(
+                $this->script($customHeadline, $customPoints, [], $language),
+                $customHeadline,
+                $customPoints,
+                $language === 'en' ? 'Save this for later' : 'احفظ هذا وارجع له لاحقاً',
+                $caption,
+                $hashtags,
+                'manual',
+                null,
+            );
+        }
+
+        try {
+            $response = $this->gemini->generate($this->prompt($reel));
+        } catch (RuntimeException $exception) {
+            throw $this->geminiFailure($exception, $language);
+        }
+
+        $data = is_array($response['data'] ?? null) ? $response['data'] : [];
+        $scenes = $this->normalizeScenes($data['scenes'] ?? null);
+        $headline = $this->firstString($data, ['headline', 'title', 'hook']);
+        if ($headline === '' && $scenes !== []) {
+            $headline = $scenes[0]['text'];
+        }
+        if ($headline === '') {
+            throw $this->failure('gemini_failed', true, $language);
+        }
+
+        $hook = $this->firstString($data, ['hook', 'opening']) ?: $headline;
+        if ($customHeadline !== '') {
+            $headline = $customHeadline;
+            $hook = $customHeadline;
+        }
+
+        $points = $scenes === []
+            ? $this->normalizeStrings([
+                $this->firstString($data, ['point_1', 'point1', 'step_1', 'step1']),
+                $this->firstString($data, ['point_2', 'point2', 'step_2', 'step2']),
+                $this->firstString($data, ['point_3', 'point3', 'step_3', 'step3']),
+            ])
+            : array_column($scenes, 'text');
+        if ($customPoints !== []) {
+            $points = $customPoints;
+            $scenes = array_map(static fn (string $point): array => ['text' => $point, 'caption' => $point], $points);
+        }
+        if ($points === []) {
+            throw $this->failure('gemini_failed', true, $language);
+        }
+
+        $cta = $this->firstString($data, ['cta', 'call_to_action'])
+            ?: ($language === 'en' ? 'Save this for later' : 'احفظ هذا وارجع له لاحقاً');
+        $caption = $caption !== '' ? $caption : $this->firstString($data, ['caption', 'description', 'post_caption']);
+        $hashtags = $hashtags !== '' ? $hashtags : $this->firstString($data, ['hashtags', 'hash_tags', 'tags']);
+
+        return $this->result(
+            $this->script($hook, $points, $scenes, $language, $cta),
+            $headline,
+            $points,
+            $cta,
+            $caption,
+            $hashtags,
+            'gemini',
+            is_string($response['model'] ?? null) ? $response['model'] : null,
+        );
+    }
+
+    private function prompt(Reel $reel): string
+    {
+        $language = $reel->language === 'ar' ? 'Arabic' : 'English';
+        $context = [
+            'topic' => $reel->topic,
+            'brief' => $reel->user_prompt ?: $reel->topic,
+            'niche' => $reel->niche,
+            'goal' => $reel->goal,
+            'target_country' => $reel->target_country,
+            'style' => $reel->style,
+            'format' => $reel->format_type,
+            'language' => $language,
+        ];
+
+        return 'You are a careful short-form video script editor. Do not promise virality or invent facts. '
+            .'Generate a JSON object with headline (max 8 words), hook (max 10 spoken words), scenes (3-4 objects with text, caption, emphasis, duration), '
+            .'cta (short imperative), caption, and hashtags (4-7 general tags). Each scene teaches one concrete idea and does not repeat the hook. '
+            .'Keep every sentence accurate and specific. Output only valid JSON. Context: '
+            .json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
+    /** @return list<array{text:string,caption:string}> */
+    private function normalizeScenes(mixed $rawScenes): array
+    {
+        if (! is_array($rawScenes)) {
+            return [];
+        }
+
+        $scenes = [];
+        foreach ($rawScenes as $scene) {
+            if (! is_array($scene)) {
+                continue;
+            }
+
+            $kind = strtolower($this->firstString($scene, ['kind', 'type']));
+            if (in_array($kind, ['hook', 'intro', 'cta', 'outro'], true)) {
+                continue;
+            }
+
+            $text = $this->firstString($scene, ['text', 'line', 'headline']);
+            if ($text === '') {
+                continue;
+            }
+
+            $scenes[] = [
+                'text' => $text,
+                'caption' => $this->firstString($scene, ['caption', 'subtitle']) ?: $text,
+            ];
+            if (count($scenes) === 4) {
+                break;
+            }
+        }
+
+        return $scenes;
+    }
+
+    /** @param array<string, mixed> $data @param list<string> $keys */
+    private function firstString(array $data, array $keys): string
+    {
+        foreach ($keys as $key) {
+            $value = $data[$key] ?? null;
+            if (is_array($value)) {
+                $value = implode(' ', $this->normalizeStrings($value));
+            }
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return '';
+    }
+
+    /** @param array<int, mixed> $values @return list<string> */
+    private function normalizeStrings(array $values): array
+    {
+        return array_values(array_filter(
+            array_map(static fn (mixed $value): string => is_scalar($value) ? trim((string) $value) : '', $values),
+            static fn (string $value): bool => $value !== '',
+        ));
+    }
+
+    /** @param list<string> $points @param list<array{text:string,caption:string}> $scenes */
+    private function script(string $hook, array $points, array $scenes, string $language, ?string $cta = null): string
+    {
+        $parts = [trim($hook)];
+        foreach ($scenes as $scene) {
+            $parts[] = trim($scene['caption'] ?: $scene['text']);
+        }
+        if ($scenes === []) {
+            array_push($parts, ...$points);
+        }
+        $parts[] = $cta ?? ($language === 'en' ? 'Save this for later' : 'احفظ هذا وارجع له لاحقاً');
+
+        return implode(' ', array_values(array_filter($parts, static fn (string $part): bool => $part !== '')));
+    }
+
+    /**
+     * @param  list<string>  $points
+     * @return array{script:string,headline:string,points:list<string>,cta:string,caption:string,hashtags:string,content_source:string,ai_model:string|null}
+     */
+    private function result(string $script, string $headline, array $points, string $cta, string $caption, string $hashtags, string $source, ?string $model): array
+    {
+        return [
+            'script' => $script,
+            'headline' => $headline,
+            'points' => $points,
+            'cta' => $cta,
+            'caption' => $caption,
+            'hashtags' => $hashtags,
+            'content_source' => $source,
+            'ai_model' => $model,
+        ];
+    }
+
+    private function geminiFailure(RuntimeException $exception, string $language): RenderFailedException
+    {
+        $message = $exception->getMessage();
+        [$stage, $retryable] = match (true) {
+            str_contains($message, 'API key is required') => ['gemini_required', false],
+            str_contains($message, 'HTTP 401') => ['gemini_key_invalid', false],
+            str_contains($message, 'HTTP 403') => ['gemini_restricted', false],
+            str_contains($message, 'HTTP 429') => ['gemini_quota', true],
+            preg_match('/HTTP 5\d{2}/', $message) === 1 => ['gemini_unavailable', true],
+            str_contains(strtolower($message), 'network') => ['provider_unreachable', true],
+            default => ['gemini_failed', true],
+        };
+
+        return $this->failure($stage, $retryable, $language, $message);
+    }
+
+    private function failure(string $stage, bool $retryable, string $language, string $logMessage = ''): RenderFailedException
+    {
+        return new RenderFailedException(
+            stage: $stage,
+            retryable: $retryable,
+            userMessage: trans('studio.errors.'.$stage, [], $language),
+            logMessage: $logMessage,
+        );
+    }
+}

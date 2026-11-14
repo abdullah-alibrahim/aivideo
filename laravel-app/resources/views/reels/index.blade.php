@@ -14,7 +14,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $isAr ? 'ماكينة المحتوى - استوديو تركيب الفيديوهات القصيرة' : 'AI Reels Machine - Short Video Studio' }}</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @vite(["resources/css/app.css", "resources/js/app.js"])
+
     <style>
         body { font-family: '{{ $isAr ? "Cairo" : "Plus Jakarta Sans" }}', sans-serif; background: #070b12; color: #f1f5f9; min-height: 100vh; }
         .studio-card { background: linear-gradient(180deg, #111827 0%, #0d131f 100%); border: 1px solid rgba(255,255,255,0.08); border-radius: 1.5rem; box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5); }
@@ -37,6 +38,16 @@
         .tab-inactive:hover { background: #1e293b; color: #f1f5f9; }
         @keyframes fadeInUp { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: translateY(0); } }
         .animate-fadeinup { animation: fadeInUp 0.35s ease forwards; }
+        @keyframes libraryCardIn {
+            from { opacity: 0; transform: translateY(8px) scale(0.985); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        [data-background-option] {
+            animation: libraryCardIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        [data-background-option]:nth-child(4n+2) { animation-delay: 0.03s; }
+        [data-background-option]:nth-child(4n+3) { animation-delay: 0.06s; }
+        [data-background-option]:nth-child(4n+4) { animation-delay: 0.09s; }
     </style>
 </head>
 <body class="antialiased">
@@ -87,6 +98,7 @@
                     <i class="fa-solid fa-list-check"></i>
                     <span>{{ $isAr ? 'ويزارد' : 'Wizard' }}</span>
                 </a>
+                @if (auth()->user()?->is_admin)
                 <a href="{{ route('analytics.dashboard', ['lang' => $lang]) }}" class="hidden md:flex px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 font-bold text-xs border border-sky-500/30 transition items-center gap-1.5">
                     <i class="fa-solid fa-chart-line"></i>
                     <span>{{ $isAr ? 'التحليلات' : 'Analytics' }}</span>
@@ -96,6 +108,7 @@
                     <i class="fa-solid fa-key text-amber-400"></i>
                     <span class="hidden sm:inline">{{ $isAr ? 'المفاتيح' : 'Keys' }}</span>
                 </a>
+                @endif
 
                 <a href="#studio-generator" aria-label="{{ $isAr ? 'توليد سريع' : 'Fast generate' }}" class="px-3 sm:px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow-lg shadow-amber-500/20 flex items-center gap-1.5">
                     <i class="fa-solid fa-bolt"></i>
@@ -1283,6 +1296,9 @@
         }
 
         document.querySelectorAll('[data-background-picker]').forEach(picker => {
+            const presetSelect = document.querySelector('select[name="bg_preset"]');
+            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
             picker.querySelectorAll('input[name="bg_preset"]').forEach(radio => {
                 radio.addEventListener('change', () => {
                     picker.querySelectorAll('[data-background-option]').forEach(card => {
@@ -1297,7 +1313,36 @@
                             indicator.classList.toggle('bg-transparent', !active);
                         }
                     });
+                    if (presetSelect) presetSelect.value = radio.value;
                 });
+            });
+
+            if (presetSelect) {
+                presetSelect.addEventListener('change', () => {
+                    const radio = picker.querySelector(`input[name="bg_preset"][value="${CSS.escape(presetSelect.value)}"]`);
+                    if (radio && !radio.checked) radio.checked = true;
+                });
+            }
+
+            picker.querySelectorAll('[data-background-video-preview]').forEach(video => {
+                const card = video.closest('[data-background-option]');
+                if (!card) return;
+
+                const start = () => {
+                    if (prefersReducedMotion) return;
+                    if (!video.getAttribute('src')) video.src = video.dataset.src;
+                    video.play().catch(() => {});
+                    video.style.opacity = '1';
+                };
+                const stop = () => {
+                    video.pause();
+                    video.style.opacity = '0';
+                };
+
+                card.addEventListener('pointerenter', start);
+                card.addEventListener('pointerleave', stop);
+                card.addEventListener('focusin', start);
+                card.addEventListener('focusout', stop);
             });
         });
 

@@ -1,5 +1,7 @@
 import unittest
 import json
+import os
+import sys
 import tempfile
 import numpy as np
 from pathlib import Path
@@ -33,8 +35,26 @@ class VerticalRevealAnimationTest(unittest.TestCase):
         self.assertIn("does not exist", error)
 
     def test_input_video_validation_decodes_a_valid_clip(self):
-        source = Path(__file__).resolve().parents[1] / "laravel-app/storage/app/public/backgrounds/clean_studio.mp4"
+        source = self._background("clean_studio.mp4")
         self.assertIsNone(validate_input_video(source))
+
+    @staticmethod
+    def _background(name):
+        """Backgrounds live under the per-OS user-data root after the data migration."""
+        override = os.environ.get("AIVIDEO_DATA_DIR")
+        if override:
+            candidate = Path(override) / "videos" / "backgrounds" / name
+            if candidate.exists():
+                return candidate
+        root = Path(
+            override
+            or (
+                Path.home() / "Library" / "Application Support" / "AI Reels Studio"
+                if sys.platform == "darwin"
+                else Path.home() / ".local" / "share" / "AI Reels Studio"
+            )
+        )
+        return root / "videos" / "backgrounds" / name
 
     def test_still_background_is_valid_and_becomes_a_timed_clip(self):
         source = Path(__file__).resolve().parents[1] / "laravel-app/public/backgrounds/rainy_city_street.jpg"
@@ -429,3 +449,59 @@ class PreviewImageTest(unittest.TestCase):
 
             with Image.open(path) as image:
                 self.assertEqual(image.size, (720, 1280))
+
+
+class QualityAndPlatformPresetTest(unittest.TestCase):
+    def test_numeric_tiers_map_to_named_presets(self):
+        self.assertEqual(engine.resolve_quality("720"), engine.QUALITY_PRESETS["draft"])
+        self.assertEqual(engine.resolve_quality("1080"), engine.QUALITY_PRESETS["hd"])
+        self.assertEqual(engine.resolve_quality(720), engine.QUALITY_PRESETS["draft"])
+        self.assertEqual(engine.resolve_quality("high"), engine.QUALITY_PRESETS["high"])
+        self.assertEqual(engine.resolve_quality("bogus"), engine.QUALITY_PRESETS["hd"])
+        self.assertEqual(engine.resolve_quality(None), engine.QUALITY_PRESETS["hd"])
+
+    def test_unknown_platforms_fall_back_to_generic(self):
+        self.assertEqual(engine.resolve_platform("tiktok"), "tiktok")
+        self.assertEqual(engine.resolve_platform("nope"), "generic")
+        self.assertEqual(engine.resolve_platform(None), "generic")
+
+    def test_quality_resolution_matches_aspect_ratio(self):
+        self.assertEqual(engine.quality_resolution("draft", "9:16"), (720, 1280))
+        self.assertEqual(engine.quality_resolution("hd", "9:16"), (1080, 1920))
+        self.assertEqual(engine.quality_resolution("high", "1:1"), (1080, 1080))
+        self.assertEqual(engine.quality_resolution("hd", "16:9"), (1920, 1080))
+
+    def test_progress_reports_elapsed_and_eta_once_render_started(self):
+        with tempfile.TemporaryDirectory() as directory:
+            progress_file = Path(directory) / "progress.json"
+            engine._RENDER_STARTED_AT = None
+            try:
+                engine._report_progress(str(progress_file), "writing_script", 30)
+                payload = json.loads(progress_file.read_text())
+                self.assertNotIn("elapsed_seconds", payload)
+                self.assertNotIn("eta_seconds", payload)
+
+                fake_start = __import__("time").time() - 10.0
+                engine._RENDER_STARTED_AT = fake_start
+                engine._report_progress(str(progress_file), "exporting_mp4", 50, fps=30)
+                payload = json.loads(progress_file.read_text())
+                self.assertGreaterEqual(payload["elapsed_seconds"], 9.0)
+                self.assertLessEqual(payload["eta_seconds"], 11.0)
+                self.assertEqual(payload["fps"], 30)
+            finally:
+                engine._RENDER_STARTED_AT = None
+
+    def test_audio_peaks_returns_bounded_envelope(self):
+        from moviepy.audio.AudioClip import AudioArrayClip
+
+        output = Path(tempfile.mkdtemp()) / "peaks.wav"
+        rate = 8000
+        samples = np.zeros((rate, 2), dtype=np.float32)
+        samples[:, 0] = 0.5 * np.sin(np.linspace(0, 40, rate))
+        AudioArrayClip(samples, fps=rate).write_audiofile(output, logger=None)
+        try:
+            peaks = engine.extract_audio_peaks(output, buckets=16)
+            self.assertEqual(len(peaks), 16)
+            self.assertTrue(all(0.0 <= peak <= 1.0 for peak in peaks))
+        finally:
+            output.unlink(missing_ok=True)

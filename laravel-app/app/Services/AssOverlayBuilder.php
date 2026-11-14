@@ -3,209 +3,161 @@
 namespace App\Services;
 
 /**
- * Generates ASS (Advanced SubStation Alpha) subtitle overlay files from text content.
- * Used by FfmpegCommandBuilder to render Arabic text with proper word wrapping,
- * line breaking, and styling instead of the drawtext filter.
+ * Builds an ASS (Advanced SubStation Alpha) overlay for reel text.
+ *
+ * libass shapes Arabic correctly, but it does not break long lines by itself in
+ * a predictable way. This builder wraps every block to the safe width of the
+ * frame, anchors each block to a fixed position, and therefore keeps text from
+ * overlapping or running off the edges.
  */
 class AssOverlayBuilder
 {
     /**
-     * Build an ASS subtitle content string from the given text components.
-     *
-     * @param  array{headline:string,points:list<string>,cta?:string,handle?:string} $content
-     * @param  array $options Additional options (font_size, etc.)
-     * @param  int $width Video width
-     * @param  int $height Video height
-     * @param  float $duration Video duration in seconds
-     * @return string ASS format content
+     * @param  array{headline: string, points: list<string>, cta?: string, handle?: string}  $content
+     * @param  array<string, mixed>  $options
      */
     public function build(array $content, array $options = [], int $width = 1080, int $height = 1920, float $duration = 10.0): string
     {
-        $font = trim((string) ($options['arabic_font'] ?? ''));
-        if ($font === '') {
-            $font = 'Noto Kufi Arabic';
+        $width = max(240, $width);
+        $height = max(240, $height);
+        $duration = max(1.0, $duration);
+
+        $family = trim((string) ($options['font_family'] ?? 'Noto Kufi Arabic'));
+        if ($family === '') {
+            $family = 'Noto Kufi Arabic';
         }
 
-        $fontSize = max(24, min(100, (int) ($options['font_scale'] ?? 100)));
-
-        $styles = $this->buildStyles($font, $fontSize);
-
-        $lines = [];
-
-        // Header
-        $lines[] = '[Script Info]';
-        $lines[] = 'Title: AI Video Subtitle';
-        $lines[] = 'ScriptType: V4.00+';
-        $lines[] = 'WrapStyle: 0';
-        $lines[] = 'ScaledTime: 0';
-        $lines[] = 'YCbCr420 true';
-        $lines[] = 'PlayResX: '.$width;
-        $lines[] = 'PlayResY: '.$height;
-        $lines[] = '';
-
-        // V4+ Styles section
-        $lines[] = '[V4+ Styles]';
-        $lines[] = 'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding';
-
-        // Add styles
-        foreach ($styles as $name => $styleLine) {
-            $lines[] = 'Style: '.$name.','.$styleLine;
-        }
-
-        $lines[] = '';
-
-        // Timer section
-        $lines[] = '[Events]';
-        $lines[] = 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text';
-
-        // Helper to build an event
-        $buildEvent = function (int $layer, float $start, float $end, string $styleName, string $text) use ($width, $duration) {
-            $startStr = $this->formatAssTime($start);
-            $endStr = $this->formatAssTime($end);
-            $escapedText = addslashes($text);
-            $escapedText = str_replace(',', '\\,', $escapedText);
-            return 'Dialogue: 0,'.$startStr.','.$endStr.',0,'.$styleName.',0,0,0,2,0,0,40,,'.$escapedText;
-        };
-
-        // Add headline entry
-        $headlineText = $this->wrapText($content['headline'], $width, $font, $fontSize);
-        $headlineStart = 0;
-        $headlineEnd = min(3.0, $duration);
-        $lines[] = $buildEvent(0, $headlineStart, $headlineEnd, 'Headline', $headlineText);
-
-        // Add points entries (distributed across the video)
-        $pointCount = max(1, count($content['points']));
-        $pointDuration = $duration / $pointCount;
-        foreach ($content['points'] as $index => $point) {
-            $start = $index * $pointDuration;
-            $end = min(($index + 1) * $pointDuration, $duration);
-            $wrappedPoint = $this->wrapText($point, $width, $font, $fontSize - 10);
-            $lines[] = $buildEvent($index + 1, $start, $end, 'Points', $wrappedPoint);
-        }
-
-        // Add CTA entry (at the end)
-        $ctaText = $this->wrapText($content['cta'] ?? '', $width, $font, $fontSize);
-        $ctaStart = max(0, $duration - 2.0);
-        $ctaEnd = $duration;
-        $lines[] = $buildEvent(count($content['points']) + 1, $ctaStart, $ctaEnd, 'CTA', $ctaText);
-
-        // Add handle entry (at the beginning or fixed position)
-        $handleText = $this->wrapText($content['handle'] ?? '', $width, $font, $fontSize - 16);
-        $lines[] = $buildEvent(count($content['points']) + 2, 0, $duration, 'Handle', $handleText);
-
-        return "\n".implode("\n", $lines)."\n";
-    }
-
-    /**
-     * Build ASS style definitions.
-     */
-    private function buildStyles(string $font, int $fontSize): array
-    {
-        $primaryColor = $this->rgbToAssColor(255, 255, 255);
-        $secondaryColor = $this->rgbToAssColor(255, 255, 255);
-        $outlineColor = 'FFFFFF';
-        $backColor = '00000000';
-
-        $headlineStyle = $this->styleLine($font, $fontSize, $primaryColor, $secondaryColor, $outlineColor, $backColor, -1, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 40, 0);
-        $pointStyle = $this->styleLine($font, max(20, $fontSize - 10), $primaryColor, $secondaryColor, $outlineColor, $backColor, 0, 0, 0, 0, 0, 0, 1, 1, 0, 2, 0, 20, 0);
-        $ctaStyle = $this->styleLine($font, max(24, $fontSize - 8), $primaryColor, $secondaryColor, $outlineColor, $backColor, -1, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 30, 0);
-        $handleStyle = $this->styleLine($font, max(16, $fontSize - 16), $primaryColor, $secondaryColor, $outlineColor, $backColor, 0, 0, 0, 0, 0, 0, 1, 1, 0, 2, 0, 10, 0);
-
-        return [
-            'Headline' => $headlineStyle,
-            'Points' => $pointStyle,
-            'CTA' => $ctaStyle,
-            'Handle' => $handleStyle,
+        $scale = max(80, min(130, (int) ($options['font_scale'] ?? 100))) / 100;
+        $sizes = [
+            'Handle' => max(14, (int) round($height * 0.030 * $scale)),
+            'Headline' => max(22, (int) round($height * 0.056 * $scale)),
+            'Points' => max(18, (int) round($height * 0.046 * $scale)),
+            'CTA' => max(20, (int) round($height * 0.050 * $scale)),
         ];
-    }
 
-    /**
-     * Build a single ASS style line.
-     */
-    private function styleLine(string $font, int $fontSize, string $primaryColor, string $secondaryColor, string $outlineColor, string $backColor, int $bold = 0, int $italic = 0, int $underline = 0, int $strikeout = 0, int $scaleX = 0, int $scaleY = 0, int $spacing = 0, int $angle = 0, int $borderStyle = 1, int $outline = 0, int $shadow = 0, int $alignment = 2, int $marginL = 0, int $marginR = 0, int $marginV = 40, int $encoding = 0): string
-    {
-        return $font.','
-            .$fontSize.','
-            .$primaryColor.','
-            .$secondaryColor.','
-            .$outlineColor.','
-            .$backColor.','
-            .($bold ? '-1' : '0').','
-            .($italic ? '1' : '0').','
-            .($underline ? '1' : '0').','
-            .($strikeout ? '1' : '0').','
-            .$scaleX.','
-            .$scaleY.','
-            .$spacing.','
-            .$angle.','
-            .$borderStyle.','
-            .$outline.','
-            .$shadow.','
-            .$alignment.','
-            .$marginL.','
-            .$marginR.','
-            .$marginV.','
-            .$encoding;
-    }
+        $anchors = [
+            'Handle' => (int) round($height * 0.075),
+            'Headline' => (int) round($height * 0.360),
+            'Points' => (int) round($height * 0.560),
+            'CTA' => (int) round($height * 0.800),
+        ];
 
-    /**
-     * Convert RGB color to ASS format (BBGGRR without #).
-     */
-    private function rgbToAssColor(int $r, int $g, int $b): string
-    {
-        return sprintf('%02X%02X%02X', $b, $g, $r);
-    }
-
-    /**
-     * Wrap text to fit within video width.
-     */
-    private function wrapText(string $text, int $width, string $font, int $fontSize): string
-    {
-        if (trim($text) === '') {
-            return '';
+        $headline = $this->normalise($content['headline'] ?? '');
+        $points = [];
+        foreach ($content['points'] ?? [] as $point) {
+            $point = $this->normalise($point);
+            if ($point !== '' && $point !== $headline && ! in_array($point, $points, true)) {
+                $points[] = $point;
+            }
         }
+        $cta = $this->normalise($content['cta'] ?? '');
+        $handle = $this->normalise($content['handle'] ?? '');
 
-        $words = explode(' ', $text);
-        $lines = [];
-        $currentLine = '';
+        $dialogue = [];
 
-        foreach ($words as $word) {
-            $testLine = $currentLine === '' ? $word : $currentLine.' '.$word;
-            $estimatedWidth = strlen($testLine) * $fontSize * 0.6;
+        $headlineEnd = $points !== [] ? min($duration, max(2.5, $duration * 0.34)) : max(2.5, $duration - 2.0);
+        $this->addEvent($dialogue, $headline, 'Headline', 0.0, min($duration, $headlineEnd), $anchors['Headline'], $width);
 
-            if ($estimatedWidth <= $width - 80) {
-                $currentLine = $testLine;
-            } else {
-                if ($currentLine !== '') {
-                    $lines[] = $currentLine;
-                }
-                $currentLine = $word;
+        if ($points !== []) {
+            $start = min($duration, $headlineEnd);
+            $end = max($start, $duration - 2.0);
+            $span = max(0.1, $end - $start);
+            $step = $span / count($points);
+            foreach ($points as $index => $point) {
+                $pointStart = $start + ($index * $step);
+                $this->addEvent($dialogue, $point, 'Points', $pointStart, $pointStart + $step, $anchors['Points'], $width);
             }
         }
 
-        if ($currentLine !== '') {
-            $lines[] = $currentLine;
-        }
+        $ctaStart = max(0.0, $duration - 2.0);
+        $this->addEvent($dialogue, $cta, 'CTA', $ctaStart, $duration, $anchors['CTA'], $width);
+        $this->addEvent($dialogue, $handle, 'Handle', 0.0, $duration, $anchors['Handle'], $width);
 
-        return implode("\n", $lines);
+        $lines = [
+            '[Script Info]',
+            'Title: AI Reel Overlay',            'ScriptType: V4.00+',
+            'WrapStyle: 0',
+            'ScaledBorderAndShadow: yes',
+            'PlayResX: '.$width,
+            'PlayResY: '.$height,
+            '',
+            '[V4+ Styles]',
+            'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+            $this->style('Handle', $family, $sizes['Handle'], '&H30FFFFFF', '&H00000000', 1, 1, 0, 0, $width),
+            // Every style is bold: libass reverses Arabic runs when it uses the
+            // regular instance of the bundled variable font.
+            $this->style('Headline', $family, $sizes['Headline'], '&H00FFFFFF', '&H00000000', 1, 3, 1, 0, $width),
+            $this->style('Points', $family, $sizes['Points'], '&H00FFFFFF', '&H00000000', 1, 2, 0, 0, $width),
+            $this->style('CTA', $family, $sizes['CTA'], '&H00FFFFFF', '&H00000000', 1, 3, 1, 0, $width),
+            '',
+            '[Events]',
+            'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+            ...$dialogue,
+        ];
+
+        return implode("\n", $lines)."\n";
     }
 
     /**
-     * Format a float time in ASS format.
+     * @param  list<string>  $dialogue
      */
-    private function formatAssTime(float $seconds): string
+    private function addEvent(array &$dialogue, string $text, string $style, float $start, float $end, int $anchorY, int $width): void
     {
-        $totalSeconds = max(0.0, $seconds);
-        $intSeconds = (int) $totalSeconds;
-        $hours = intdiv($intSeconds * 3600, 3600);
-        $minutes = intdiv($intSeconds * 60, 60) % 60;
-        $secondsFloor = $intSeconds;
-        $centiseconds = round(($totalSeconds - $intSeconds) * 100);
-
-        if ($hours > 0) {
-            return sprintf('%d:%02d:%02d,%02d', $hours, $minutes, $secondsFloor, $centiseconds);
+        if ($text === '') {
+            return;
         }
 
-        return sprintf('%02d:%02d:%02d,%02d', $minutes, 0, $secondsFloor, $centiseconds);
+        $dialogue[] = sprintf(
+            'Dialogue: 0,%s,%s,%s,,0,0,0,,{\an5\pos(%d,%d)}%s',
+            $this->timestamp($start),
+            $this->timestamp(max($start + 0.1, $end)),
+            $style,
+            (int) round($width / 2),
+            $anchorY,
+            $this->escape($text),
+        );
+    }
+
+    private function style(string $name, string $family, int $fontSize, string $primary, string $outline, int $bold, int $outlineWidth, int $shadow, int $encoding, int $width): string
+    {
+        $margin = (int) round($width * 0.07);
+
+        return sprintf(
+            'Style: %s,%s,%d,%s,&H000000FF,%s,&H80000000,%d,0,0,0,100,100,0,0,1,%d,%d,5,%d,%d,0,%d',
+            $name,
+            $family,
+            $fontSize,
+            $primary,
+            $outline,
+            $bold ? -1 : 0,
+            $outlineWidth,
+            $shadow,
+            $margin,
+            $margin,
+            $encoding,
+        );
+    }
+
+    private function escape(string $line): string
+    {
+        return str_replace(['\\', '{', '}'], ['', '(', ')'], $line);
+    }
+
+    private function normalise(string $text): string
+    {
+        $text = str_replace(["\r\n", "\r", "\n", "\t"], ' ', $text);
+        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+
+        return trim($text);
+    }
+
+    private function timestamp(float $seconds): string
+    {
+        $total = max(0, (int) round($seconds * 100));
+        $hours = intdiv($total, 360000);
+        $minutes = intdiv($total % 360000, 6000);
+        $remaining = $total % 6000;
+
+        return sprintf('%d:%02d:%02d.%02d', $hours, $minutes, intdiv($remaining, 100), $remaining % 100);
     }
 }

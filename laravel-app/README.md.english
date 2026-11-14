@@ -1,0 +1,29 @@
+# AI Reels Studio
+
+This directory contains a Laravel application for the AI Reels Studio interface. The application manages the Wizard, AI provider keys, the render queue, the Reels library, and partial video rendering. The render engine is located in `../python_engine/` and uses Python, MoviePy, and FFmpeg.
+
+## Requirements
+
+- PHP 8.3 or newer with `mbstring` and `pdo_sqlite` and `fileinfo`.
+- Composer.
+- Node.js 22 or newer and npm.
+- Python 3.11 or newer and FFmpeg or `imageio-ffmpeg`.
+- Gemini AI key for AI-powered generation. Manual mode can run without Gemini.
+- ElevenLabs key and Voice ID are optional for voiceover.
+
+## Local Installation
+
+From the project root:
+
+```bash
+composer install --working-dir=laravel-app
+cp laravel-app/.env.example laravel-app/.env
+php laravel-app/artisan key:generate
+php laravel-app/artisan migrate --force
+npm ci --prefix laravel-app
+npm run build --prefix laravel-app
+python3 -m venv venv
+./venv/bin/pip install -r requirements.lock.txt
+```
+
+Place provider keys in the Provider Key Manager or in the local `.env`. Do not save `.env` or API keys in Git.

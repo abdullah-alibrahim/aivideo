@@ -19,8 +19,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>ماكينة المحتوى - استوديو تركيب الفيديوهات القصيرة</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap" rel="stylesheet">
+    @vite(["resources/css/app.css", "resources/js/app.js"])
+
 
     <style>
         body {
@@ -118,6 +118,39 @@
             border-color: #f59e0b;
             box-shadow: 0 0 12px rgba(245, 158, 11, 0.5);
         }
+        /* Motion background preview: the selected clip plays behind the copy. */
+        .preview-motion-video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.45s ease;
+            pointer-events: none;
+        }
+        .reel-preview-frame[data-motion="on"] .preview-motion-video {
+            opacity: 1;
+        }
+        .preview-scrim {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+        .reel-preview-frame > *:not(.preview-motion-video):not(.preview-scrim) {
+            position: relative;
+            z-index: 2;
+        }
+        @keyframes libraryCardIn {
+            from { opacity: 0; transform: translateY(8px) scale(0.985); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        [data-background-option] {
+            animation: libraryCardIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        [data-background-option]:nth-child(4n+2) { animation-delay: 0.03s; }
+        [data-background-option]:nth-child(4n+3) { animation-delay: 0.06s; }
+        [data-background-option]:nth-child(4n+4) { animation-delay: 0.09s; }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
         }
@@ -535,8 +568,7 @@
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                     <!-- Live preview card (left 5 cols) -->
                     <div class="lg:col-span-5 studio-card p-6 lg:sticky lg:top-24 space-y-4">
-                            <div class="reel-preview-frame rounded-2xl bg-slate-900 overflow-hidden" id="step4PreviewBox">
-      <img src="https://picsum.photos/seed/reel-step4/400/600" alt="Reel preview" class="w-full h-full object-cover" />
+                            <div class="reel-preview-frame rounded-2xl bg-[#030712] bg-cover bg-center flex flex-col justify-between border border-slate-800 relative overflow-hidden" id="step4PreviewBox">
                                 <div class="flex items-center justify-between text-[10px] text-slate-400">
                                     <span>{{ old('handle', '') }}</span>
                                     <span class="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">مساحة النص</span>
@@ -981,8 +1013,7 @@
                         </div>
 
                         <div class="studio-card p-6 space-y-4">
-                        <div class="reel-preview-frame rounded-2xl bg-slate-900 overflow-hidden" id="step7PreviewCard">
-      <img src="https://picsum.photos/seed/reel-step7/800/1080" alt="Full reel" class="w-full h-64 object-cover" />
+                        <div class="reel-preview-frame rounded-2xl bg-[#030712] bg-cover bg-center p-5 flex flex-col justify-between border border-slate-800 relative overflow-hidden" id="step7PreviewCard">
                             <div class="flex items-center justify-between text-[10px] text-slate-400 z-10">
                                 <span id="s7Handle" dir="ltr">{{ old('handle', '') }}</span>
                                 <span class="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-bold">مساحة النص</span>
@@ -1391,6 +1422,27 @@
         }
 
         const backgroundPosters = @json(array_column($backgrounds, 'poster_url', 'id'));
+        const backgroundMedia = @json(array_column($backgrounds, 'media_url', 'id'));
+        const backgroundKinds = @json(array_column($backgrounds, 'media_type', 'id'));
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function ensurePreviewLayers(frame) {
+            if (!frame || frame.dataset.layersReady === '1') return frame;
+            const video = document.createElement('video');
+            video.className = 'preview-motion-video';
+            video.muted = true;
+            video.loop = true;
+            video.playsInline = true;
+            video.preload = 'none';
+            video.setAttribute('aria-hidden', 'true');
+            const scrim = document.createElement('div');
+            scrim.className = 'preview-scrim';
+            frame.prepend(scrim);
+            frame.prepend(video);
+            frame.dataset.layersReady = '1';
+
+            return frame;
+        }
 
         function updateBackgroundPreview() {
             const selected = document.querySelector('input[name="bg_preset"]:checked');
@@ -1415,14 +1467,55 @@
             const dimming = Number(document.getElementById('backgroundDimming')?.value || 35) / 100;
             const topOpacity = (0.3 + dimming * 0.35).toFixed(2);
             const bottomOpacity = (0.52 + dimming * 0.35).toFixed(2);
+            const scrimGradient = `linear-gradient(180deg, rgba(3, 7, 18, ${topOpacity}), rgba(3, 7, 18, ${bottomOpacity}))`;
+            const isMotion = backgroundKinds[selected.value] === 'video';
+            const mediaUrl = backgroundMedia[selected.value];
 
             ['step4PreviewBox', 'liveDesignCardBox', 'step7PreviewCard'].forEach(id => {
-                const preview = document.getElementById(id);
-                if (preview) {
-                    preview.style.backgroundImage = `linear-gradient(180deg, rgba(3, 7, 18, ${topOpacity}), rgba(3, 7, 18, ${bottomOpacity})), url("${poster}")`;
+                const preview = ensurePreviewLayers(document.getElementById(id));
+                if (!preview) return;
+
+                preview.style.backgroundImage = `${scrimGradient}, url("${poster}")`;
+                const video = preview.querySelector('.preview-motion-video');
+                const scrim = preview.querySelector('.preview-scrim');
+                if (scrim) scrim.style.background = scrimGradient;
+
+                if (!video) return;
+
+                if (isMotion && mediaUrl && !prefersReducedMotion) {
+                    if (video.dataset.src !== mediaUrl) {
+                        video.dataset.src = mediaUrl;
+                        video.src = mediaUrl;
+                    }
+                    preview.dataset.motion = 'on';
+                    video.play().catch(() => {});
+                } else {
+                    preview.dataset.motion = 'off';
+                    video.pause();
                 }
             });
         }
+
+        document.querySelectorAll('[data-background-video-preview]').forEach(video => {
+            const card = video.closest('[data-background-option]');
+            if (!card) return;
+
+            const start = () => {
+                if (prefersReducedMotion) return;
+                if (!video.getAttribute('src')) video.src = video.dataset.src;
+                video.play().catch(() => {});
+                video.style.opacity = '1';
+            };
+            const stop = () => {
+                video.pause();
+                video.style.opacity = '0';
+            };
+
+            card.addEventListener('pointerenter', start);
+            card.addEventListener('pointerleave', stop);
+            card.addEventListener('focusin', start);
+            card.addEventListener('focusout', stop);
+        });
 
         document.querySelectorAll('input[name="bg_preset"]').forEach(radio => {
             radio.addEventListener('change', updateBackgroundPreview);
@@ -2344,63 +2437,5 @@
             }
         }
     </script>
-</body>
-</html>
-
-<!-- Framer Motion Integration -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/framer-motion/11.5.4/framer-motion.min.js" integrity="sha512-4u6ZbK99knJxk6OvkNl6WkrhP8V0mXJmBbdV7f2n9XQSZdR2+Kfu8mLjn3+DfIREoNMlXsZdVwNdcA4wgJ8Ifg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.css" />
-
-<script>
-    // Initialize Framer Motion for step transitions
-    document.addEventListener('DOMContentLoaded', function() {
-        // Animate step cards on enter
-        const stepCards = document.querySelectorAll('.studio-card');
-        stepCards.forEach((card, index) => {
-            card.style.opacity = '0';
-            card.style.transform = 'translateY(20px)';
-            card.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
-            
-            // Observe and animate when visible
-            const observer = new IntersectionObserver((entries) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        entry.target.style.opacity = '1';
-                        entry.target.style.transform = 'translateY(0)';
-                    }
-                });
-            });
-            observer.observe(card);
-        });
-        
-        // Animate step tab buttons on hover
-        const stepTabs = document.querySelectorAll('.step-tab-btn');
-        stepTabs.forEach((tab, index) => {
-            tab.style.transition = 'all 0.3s ease';
-            tab.addEventListener('mouseenter', () => {
-                tab.style.transform = 'translateX(4px)';
-            });
-            tab.addEventListener('mouseleave', () => {
-                tab.style.transform = 'translateX(0)';
-            });
-        });
-    });
-</script>
-
-<!-- GSAP Initialization for Video Effects -->
-<script>
-    // GSAP basic setup for potential video effect controls
-    gsap.registerPlugin({});
-    
-    // Example: Progress bar animation
-    function animateProgress(current, max) {
-        gsap.to('.progress-bar', {
-            width: `${(current / max) * 100}%`,
-            duration: 0.5,
-            ease: 'power2.out'
-        });
-    }
-</script>
 </body>
 </html>

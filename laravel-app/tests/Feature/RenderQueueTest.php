@@ -5,7 +5,8 @@ namespace Tests\Feature;
 use App\Exceptions\RenderFailedException;
 use App\Jobs\GenerateReelVideo;
 use App\Models\Reel;
-use App\Services\ReelRenderer;
+use App\Models\User;
+use App\Services\RenderEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -27,6 +28,7 @@ class RenderQueueTest extends TestCase
 
     public function test_generation_dispatches_the_render_job_and_returns_immediately(): void
     {
+        $this->actingAs(User::factory()->create());
         Queue::fake();
         config()->set('services.gemini.keys_json', '["test-gemini-key"]');
 
@@ -61,13 +63,15 @@ class RenderQueueTest extends TestCase
         $engine = config('studio.engine');
 
         $this->assertIsArray($engine);
-        $this->assertNotEmpty($engine['python_bin']);
-        $this->assertNotEmpty($engine['script']);
+        $this->assertSame('ffmpeg', $engine['driver']);
+        $this->assertNotEmpty($engine['ffmpeg_bin']);
+        $this->assertNotEmpty($engine['ffprobe_bin']);
         $this->assertSame(900, $engine['render_timeout_seconds']);
     }
 
     public function test_motion_library_settings_are_passed_to_the_render_job(): void
     {
+        $this->actingAs(User::factory()->create());
         Queue::fake();
         config()->set('services.gemini.keys_json', '["test-gemini-key"]');
 
@@ -78,6 +82,7 @@ class RenderQueueTest extends TestCase
             'scene_transition' => 'varied',
             'hook_word_by_word' => '1',
             'highlight_important' => '0',
+            'bg_preset' => 'rainy_city_street',
         ]));
 
         $response->assertRedirect();
@@ -103,7 +108,7 @@ class RenderQueueTest extends TestCase
             'duration' => 5,
         ]);
 
-        $this->mock(ReelRenderer::class, function ($mock): void {
+        $this->mock(RenderEngine::class, function ($mock): void {
             $mock->shouldReceive('render')->once()->andReturn([
                 'status' => 'success',
                 'script' => 'Headline * text',
@@ -119,7 +124,7 @@ class RenderQueueTest extends TestCase
         });
 
         $job = new GenerateReelVideo($reel, ['/tmp/source.mp4'], null, [], 'reels/job-success.mp4');
-        $job->handle(app(ReelRenderer::class));
+        $job->handle(app(RenderEngine::class));
 
         $reel->refresh();
         $this->assertSame('completed', $reel->status);
@@ -143,14 +148,14 @@ class RenderQueueTest extends TestCase
             'status' => 'processing',
         ]);
 
-        $this->mock(ReelRenderer::class, function ($mock): void {
+        $this->mock(RenderEngine::class, function ($mock): void {
             $mock->shouldReceive('render')->once()->andThrow(
                 new RenderFailedException('gemini_required', false, 'Gemini key is required.'),
             );
         });
 
         $job = new GenerateReelVideo($reel, ['/tmp/source.mp4'], null, [], 'reels/job-failure.mp4');
-        $job->handle(app(ReelRenderer::class));
+        $job->handle(app(RenderEngine::class));
 
         $reel->refresh();
         $this->assertSame('failed', $reel->status);
@@ -170,12 +175,12 @@ class RenderQueueTest extends TestCase
             'cancel_requested_at' => now(),
         ]);
 
-        $this->mock(ReelRenderer::class, function ($mock): void {
+        $this->mock(RenderEngine::class, function ($mock): void {
             $mock->shouldNotReceive('render');
         });
 
         $job = new GenerateReelVideo($reel, ['/tmp/source.mp4'], null, [], 'reels/cancelled.mp4');
-        $job->handle(app(ReelRenderer::class));
+        $job->handle(app(RenderEngine::class));
 
         $reel->refresh();
         $this->assertSame('cancelled', $reel->status);

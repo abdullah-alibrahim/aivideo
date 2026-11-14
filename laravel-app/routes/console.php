@@ -11,5 +11,11 @@ Artisan::command('inspire', function () {
 // Recover renders that were interrupted by a worker restart or a server crash.
 Schedule::command('reels:recover-stale')->everyFiveMinutes()->withoutOverlapping();
 
+// Shared hosting runs one bounded render per scheduler invocation.
+$workerTimeout = (int) config('studio.engine.queue_worker_timeout_seconds', 1200);
+Schedule::command("queue:work --stop-when-empty --max-jobs=1 --timeout={$workerTimeout}")
+    ->everyMinute()
+    ->withoutOverlapping((int) ceil($workerTimeout / 60) + 5);
+
 // Remove old failed renders and orphaned media once a day.
 Schedule::command('reels:prune --days=30')->dailyAt('03:15');

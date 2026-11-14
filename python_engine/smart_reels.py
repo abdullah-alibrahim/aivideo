@@ -10,6 +10,7 @@ background motion; it does not generate new footage or score likely reach.
 import os
 import sys
 import json
+import time
 import argparse
 import hashlib
 import unicodedata
@@ -60,6 +61,53 @@ if os.getenv("PYTHON_DOTENV_DISABLED") != "1":
     load_dotenv()
 
 
+QUALITY_PRESETS = {
+    "draft": {"fps": 24, "crf": "26", "preset": "veryfast", "height": 720, "audio_bitrate": "128k"},
+    "hd": {"fps": 30, "crf": "21", "preset": "medium", "height": 1080, "audio_bitrate": "192k"},
+    "high": {"fps": 30, "crf": "18", "preset": "slow", "height": 1080, "audio_bitrate": "192k"},
+}
+
+# Per-platform delivery caps (maxrate/bufsize) so uploads pass each platform's
+# encoding ladder without re-encoding surprises.
+PLATFORM_PRESETS = {
+    "tiktok": {"maxrate": "6M", "bufsize": "12M"},
+    "instagram": {"maxrate": "8M", "bufsize": "16M"},
+    "youtube": {"maxrate": "16M", "bufsize": "24M"},
+    "generic": {"maxrate": None, "bufsize": None},
+}
+
+
+def resolve_quality_key(value):
+    """Accept legacy numeric tiers (720/1080) and named presets (draft/hd/high)."""
+    key = str(value if value is not None else "hd").strip().lower()
+    aliases = {"720": "draft", "1080": "hd"}
+    key = aliases.get(key, key)
+    return key if key in QUALITY_PRESETS else "hd"
+
+
+def resolve_quality(value):
+    return QUALITY_PRESETS[resolve_quality_key(value)]
+
+
+def resolve_platform(value):
+    key = str(value if value is not None else "generic").strip().lower()
+    return key if key in PLATFORM_PRESETS else "generic"
+
+
+_RENDER_STARTED_AT = None
+
+
+def _render_timing(percent):
+    """Elapsed/ETA seconds since the current render started, when known."""
+    if _RENDER_STARTED_AT is None:
+        return None, None
+    elapsed = max(0.0, time.time() - _RENDER_STARTED_AT)
+    percent = max(1, int(percent))
+    if percent >= 100:
+        return elapsed, 0.0
+    return elapsed, elapsed * (100 - percent) / percent
+
+
 def _report_progress(path, stage, percent, **metadata):
     """Write render progress atomically so the queue worker can poll it."""
     if not path:
@@ -84,6 +132,11 @@ def _report_progress(path, stage, percent, **metadata):
         temporary = f"{path}.tmp"
         with open(temporary, "w", encoding="utf-8") as handle:
             payload = {"stage": stage, "percent": int(percent)}
+            elapsed, eta = _render_timing(percent)
+            if elapsed is not None:
+                payload["elapsed_seconds"] = round(elapsed, 1)
+            if eta is not None:
+                payload["eta_seconds"] = round(eta, 1)
             payload.update(metadata)
             json.dump(payload, handle)
         os.replace(temporary, path)
@@ -114,17 +167,23 @@ def fade_audio_edges(clip, fade_in=0.18, fade_out=0.32):
 
 FONT_DIRECTORY = Path(__file__).resolve().parent / "fonts"
 BUNDLED_FONT = FONT_DIRECTORY / "NotoKufiArabic.ttf"
+WINDOWS_FONT_DIRECTORY = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
 
 SYSTEM_FONTS = [
-    "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
-    "/usr/local/share/fonts/NotoSansArabic-Regular.ttf",
-    "/System/Library/Fonts/GeezaPro.ttc",
-    "/System/Library/Fonts/SFArabic.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/Library/Fonts/Arial.ttf",
+    Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf"),
+    Path("/usr/local/share/fonts/NotoSansArabic-Regular.ttf"),
+    Path("/System/Library/Fonts/GeezaPro.ttc"),
+    Path("/System/Library/Fonts/SFArabic.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+    Path("/System/Library/Fonts/Helvetica.ttc"),
+    Path("/Library/Fonts/Arial.ttf"),
+    WINDOWS_FONT_DIRECTORY / "NotoSansArabic-Regular.ttf",
+    WINDOWS_FONT_DIRECTORY / "NotoSansArabic-Bold.ttf",
+    WINDOWS_FONT_DIRECTORY / "Tahoma.ttf",
+    WINDOWS_FONT_DIRECTORY / "Arial.ttf",
+    WINDOWS_FONT_DIRECTORY / "segoeui.ttf",
 ]
 
 
@@ -260,6 +319,42 @@ def normalize_loudness(path, target=-14.0):
         if os.path.exists(temporary):
             os.unlink(temporary)
         return False
+
+
+def extract_audio_peaks(path, buckets=64):
+    """Return a downsampled peak envelope (0.0-1.0) of the rendered audio.
+
+    Reads raw mono PCM through ffmpeg (already required for loudness
+    normalization) instead of MoviePy's boundary-limited soundarray reader.
+    """
+    ffmpeg = _ffmpeg_binary()
+    if not ffmpeg:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                ffmpeg, "-v", "error", "-i", path,
+                "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+        )
+    except Exception:
+        return None
+    raw = proc.stdout
+    if not raw or len(raw) < 2:
+        return None
+    samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    count = max(1, int(buckets))
+    edges = np.linspace(0, len(samples), count + 1, dtype=int)
+    peaks = []
+    for index in range(count):
+        chunk = samples[edges[index]:edges[index + 1]]
+        peak = float(np.abs(chunk).max()) if len(chunk) else 0.0
+        peaks.append(round(min(1.0, peak), 3))
+    return peaks
 
 
 def write_thumbnail(video_path, image_path, duration):
@@ -1657,14 +1752,7 @@ def plan_scene_durations(texts, requested_duration, voiceover=False, hints=None,
 
 def build_preview_image(args):
     """Render one real scene card to an image for the wizard preview."""
-    quality = int(getattr(args, "quality", 1080))
-    if quality not in (720, 1080):
-        quality = 1080
-    resolution = (
-        (quality, round(quality * 16 / 9))
-        if args.aspect_ratio == "9:16"
-        else ((quality, quality) if args.aspect_ratio == "1:1" else (round(quality * 16 / 9), quality))
-    )
+    resolution = quality_resolution(getattr(args, "quality", 1080), args.aspect_ratio)
 
     points = [str(point).strip() for point in (getattr(args, "custom_points", None) or []) if str(point).strip()]
     headline = str(getattr(args, "custom_headline", None) or args.topic or "").strip()
@@ -1727,15 +1815,25 @@ def build_preview_image(args):
     return output
 
 
-def build_ultra_reel(args):
-    quality = int(getattr(args, "quality", 1080))
-    if quality not in (720, 1080):
-        quality = 1080
-    resolution = (
-        (quality, round(quality * 16 / 9))
-        if args.aspect_ratio == "9:16"
-        else ((quality, quality) if args.aspect_ratio == "1:1" else (round(quality * 16 / 9), quality))
+def quality_resolution(quality, aspect_ratio):
+    """Map a quality preset/numeric tier to (width, height) for the aspect ratio."""
+    preset = resolve_quality(quality)
+    height = int(preset["height"])
+    return (
+        (height, round(height * 16 / 9))
+        if aspect_ratio == "9:16"
+        else ((height, height) if aspect_ratio == "1:1" else (round(height * 16 / 9), height))
     )
+
+
+def build_ultra_reel(args):
+    global _RENDER_STARTED_AT
+    if _RENDER_STARTED_AT is None:
+        _RENDER_STARTED_AT = time.time()
+    quality = resolve_quality(getattr(args, "quality", 1080))
+    platform_key = resolve_platform(getattr(args, "platform", "generic"))
+    platform_caps = PLATFORM_PRESETS[platform_key]
+    resolution = quality_resolution(getattr(args, "quality", 1080), args.aspect_ratio)
     progress_file = getattr(args, "progress_file", None)
     custom_pts = args.custom_points if getattr(args, "custom_points", None) else []
     custom_headline = str(getattr(args, "custom_headline", None) or "").strip()
@@ -2030,24 +2128,33 @@ def build_ultra_reel(args):
             final_video = final_video.with_audio(mixed_audio) if hasattr(final_video, 'with_audio') else final_video.set_audio(mixed_audio)
 
         os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-        _report_progress(progress_file, "exporting_mp4", 82)
+        ffmpeg_params = [
+            '-crf', quality["crf"],
+            '-preset', quality["preset"],
+            '-movflags', '+faststart',
+            '-pix_fmt', 'yuv420p',
+        ]
+        if platform_caps.get("maxrate"):
+            ffmpeg_params.extend(['-maxrate', platform_caps["maxrate"], '-bufsize', platform_caps["bufsize"]])
+        _report_progress(progress_file, "exporting_mp4", 82, fps=quality["fps"])
         final_video.write_videofile(
             args.output,
-            fps=30,
+            fps=quality["fps"],
             codec='libx264',
             audio_codec='aac',
-            audio_bitrate='192k',
-            ffmpeg_params=['-crf', '19', '-preset', 'veryfast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p'],
+            audio_bitrate=quality["audio_bitrate"],
+            ffmpeg_params=ffmpeg_params,
             threads=4,
             logger=None
         )
-        _report_progress(progress_file, "finalizing", 96)
+        _report_progress(progress_file, "finalizing", 96, fps=quality["fps"])
         if audio_layers:
             normalize_loudness(args.output)
+        audio_peaks = extract_audio_peaks(args.output)
         thumbnail_path = getattr(args, "thumbnail", None)
         if thumbnail_path:
             write_thumbnail(args.output, thumbnail_path, render_duration)
-        _report_progress(progress_file, "completed", 100)
+        _report_progress(progress_file, "completed", 100, fps=quality["fps"])
     finally:
         clips_to_close = [final_video, concatenated, *overlays, *smoke_overlays, *processed, *auxiliary_audio, voiceover_clip]
         for clip in clips_to_close:
@@ -2082,7 +2189,11 @@ def build_ultra_reel(args):
         "language": args.language,
         "template": args.template,
         "niche": args.niche,
-        "goal": args.goal
+        "goal": args.goal,
+        "quality": resolve_quality_key(getattr(args, "quality", 1080)),
+        "platform": platform_key,
+        "render_fps": quality["fps"],
+        "audio_peaks": audio_peaks,
     }
 
 def main():
@@ -2119,7 +2230,8 @@ def main():
     parser.add_argument("--manual-content", action="store_true", help="Use the supplied headline and points without contacting Gemini.")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--progress-file", default=None, help="Write render progress as JSON for the queue worker.")
-    parser.add_argument("--quality", type=int, default=1080, choices=[720, 1080], help="Vertical resolution tier.")
+    parser.add_argument("--quality", default="hd", help="Quality preset: draft, hd, or high (720/1080 accepted as aliases).")
+    parser.add_argument("--platform", default="generic", choices=["tiktok", "instagram", "youtube", "generic"], help="Target platform bitrate caps.")
     parser.add_argument("--thumbnail", default=None, help="Write a JPG cover image next to the video.")
     parser.add_argument("--no-auto-music", dest="auto_music", action="store_false", default=True, help="Disable the bundled ambient music bed.")
     parser.add_argument("--no-captions", dest="captions", action="store_false", default=True, help="Disable burned-in word captions.")

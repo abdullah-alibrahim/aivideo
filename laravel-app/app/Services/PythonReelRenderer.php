@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Exceptions\RenderFailedException;
 use App\Models\ProviderSetting;
 use App\Models\Reel;
-use App\Support\StudioPaths;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -13,9 +12,87 @@ use Illuminate\Support\Str;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
-class ReelRenderer
+class PythonReelRenderer implements RenderEngine
 {
     public function __construct(private readonly ProviderKeyRing $keyRing) {}
+
+    /** @param array<string, mixed> $options */
+    public function renderPreview(array $options, string $outputPath): void
+    {
+        $language = (string) ($options['language'] ?? 'ar');
+        $headline = trim((string) ($options['headline'] ?? ''));
+        $points = array_values(array_filter(
+            array_map(
+                static fn (mixed $point): string => is_string($point) ? trim($point) : '',
+                (array) ($options['custom_points'] ?? []),
+            ),
+            static fn (string $point): bool => $point !== '',
+        ));
+
+        $command = [
+            $this->pythonBinary($language),
+            $this->engineScript($language),
+            '--preview-image', $outputPath,
+            '--topic', $headline !== '' ? $headline : 'preview',
+            '--language', $language,
+            '--template', (string) ($options['template'] ?? 'classic'),
+            '--handle', (string) ($options['handle'] ?? ''),
+            '--accent-color', (string) ($options['accent_color'] ?? '#fb7185'),
+            '--font-scale', (string) (int) ($options['font_scale'] ?? 100),
+            '--quality', (string) (int) ($options['quality'] ?? 1080),
+            '--aspect-ratio', (string) ($options['aspect_ratio'] ?? '9:16'),
+            '--anti-border',
+        ];
+
+        if ($headline !== '') {
+            $command[] = '--custom-headline';
+            $command[] = $headline;
+        }
+
+        if ($points !== []) {
+            $command[] = '--custom-points';
+            array_push($command, ...$points);
+        }
+
+        $directory = dirname($outputPath);
+        if (! is_dir($directory) && ! mkdir($directory, 0755, true) && ! is_dir($directory)) {
+            throw new RenderFailedException(
+                stage: 'preview_failed',
+                retryable: false,
+                userMessage: 'Preview could not be saved.',
+                logMessage: 'Unable to create preview directory '.$directory,
+            );
+        }
+
+        $process = new Process($command, base_path('../'), [
+            'AIVIDEO_ARABIC_FONT' => (string) config('studio.engine.arabic_font', ''),
+        ]);
+        $process->setTimeout(60);
+
+        try {
+            $process->run();
+        } catch (ProcessTimedOutException $exception) {
+            @unlink($outputPath);
+
+            throw new RenderFailedException(
+                stage: 'timeout',
+                retryable: true,
+                userMessage: 'Preview render timed out.',
+                logMessage: $exception->getMessage(),
+            );
+        }
+
+        if (! $process->isSuccessful() || ! is_file($outputPath)) {
+            @unlink($outputPath);
+
+            throw new RenderFailedException(
+                stage: 'preview_failed',
+                retryable: false,
+                userMessage: 'Preview render failed.',
+                logMessage: Str::limit($process->getErrorOutput(), 800),
+            );
+        }
+    }
 
     /**
      * Render one reel on the Python engine and return the engine payload.
@@ -50,14 +127,14 @@ class ReelRenderer
             );
         }
 
-        $outputAbsolute = Storage::disk('public')->path($outputRelativePath);
+        $outputAbsolute = Storage::disk('private')->path($outputRelativePath);
         $baseName = pathinfo($outputRelativePath, PATHINFO_FILENAME);
         $thumbnailRelativePath = 'thumbnails/'.$baseName.'.jpg';
         $subtitleRelativePath = 'subtitles/'.$baseName.'.srt';
-        $thumbnailAbsolute = Storage::disk('public')->path($thumbnailRelativePath);
-        $subtitleAbsolute = Storage::disk('public')->path($subtitleRelativePath);
-        Storage::disk('public')->makeDirectory('thumbnails');
-        Storage::disk('public')->makeDirectory('subtitles');
+        $thumbnailAbsolute = Storage::disk('private')->path($thumbnailRelativePath);
+        $subtitleAbsolute = Storage::disk('private')->path($subtitleRelativePath);
+        Storage::disk('private')->makeDirectory('thumbnails');
+        Storage::disk('private')->makeDirectory('subtitles');
         $progressFile = $this->progressFile($reel);
         $this->ensureProgressDirectory();
 
@@ -253,7 +330,6 @@ class ReelRenderer
         $geminiKeys = ! empty($options['manual_content']) ? [] : $this->mergeKeys(
             $this->keyRing->rotatedValues('gemini'),
             $this->configuredGeminiKeys(),
-            (array) ($options['gemini_keys'] ?? []),
         );
         $elevenLabsKeys = $this->mergeKeys(
             $this->keyRing->rotatedValues('elevenlabs'),
@@ -299,7 +375,7 @@ class ReelRenderer
 
     private function pythonBinary(?string $language = null): string
     {
-        $binary = (string) config('studio.engine.python_bin');
+        $binary = (string) (config('studio.engine.python_bin') ?: base_path('../venv/bin/python3'));
 
         if (! is_file($binary) || ! is_executable($binary)) {
             throw new RenderFailedException(
@@ -331,12 +407,12 @@ class ReelRenderer
 
     private function progressFile(Reel $reel): string
     {
-        return StudioPaths::progress().'/'.$reel->id.'.json';
+        return storage_path('app/private/render-progress/'.$reel->id.'.json');
     }
 
     private function ensureProgressDirectory(): void
     {
-        $directory = StudioPaths::progress();
+        $directory = storage_path('app/private/render-progress');
 
         if (! is_dir($directory)) {
             mkdir($directory, 0755, true);

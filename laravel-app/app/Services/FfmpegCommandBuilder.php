@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Reel;
-use App\Services\AssOverlayBuilder;
 
 class FfmpegCommandBuilder
 {
@@ -115,7 +114,6 @@ class FfmpegCommandBuilder
         if ($font === '') {
             $font = base_path('../python_engine/fonts/NotoKufiArabic.ttf');
         }
-        $fontScale = max(80, min(130, (int) ($options['font_scale'] ?? 100)));
 
         // Generate ASS subtitle file using AssOverlayBuilder for proper Arabic text rendering
         // Derive ASS path from the subtitlePath parameter (which is an SRT file in the work directory)
@@ -125,30 +123,23 @@ class FfmpegCommandBuilder
             if (! is_dir($assDir)) {
                 @mkdir($assDir, 0755, true);
             }
-            $assBuilder = new AssOverlayBuilder();
+            $assBuilder = new AssOverlayBuilder;
             $assContent = $assBuilder->build([
-                'headline' => trim((string) ($options['headline'] ?? $textFiles['headline'] ?? '')),
-                'points'   => is_array($textFiles['points'] ?? []) ? array_values($textFiles['points']) : [],
-                'cta'      => trim((string) ($textFiles['cta'] ?? $options['cta'] ?? '')),
-                'handle'   => trim((string) ($textFiles['handle'] ?? $options['handle'] ?? '')),
+                'headline' => $this->textSource($options['headline'] ?? $textFiles['headline'] ?? ''),
+                'points' => $this->textSources($options['custom_points'] ?? $textFiles['points'] ?? []),
+                'cta' => $this->textSource($options['cta'] ?? $textFiles['cta'] ?? ''),
+                'handle' => $this->textSource($options['handle'] ?? $textFiles['handle'] ?? ''),
             ], $options, $width, $height, $duration);
             file_put_contents($assPath, $assContent);
         }
 
-        // Use subtitles filter with ASS file for headline, points, CTA, and handle
-        // This replaces all drawtext filters with proper word wrapping, Arabic support, and styling
+        // The ASS overlay owns every on-screen text block. Do not force style
+        // values here: they would override the positions computed above and
+        // stack the headline, points and CTA on top of each other.
         if ($assPath !== null && is_file($assPath)) {
-            $filterParts[] = '['.$base.']subtitles=filename='.$this->filterValue($assPath).
-                ':force_style="FontName='.$font.',FontSize='.$this->fontSize($height, $fontScale, 0.052).',Outline=2,Shadow=0,Alignment=2,MarginV=40"'.
-                '[headlined]';
+            $filterParts[] = '['.$base.']subtitles=filename='.$this->filterValue($assPath)
+                .$this->fontsDirectoryOption($font).'[headlined]';
             $base = 'headlined';
-        }
-
-        // Captions subtitles filter (existing functionality)
-        if ($subtitlePath !== null && (bool) ($options['captions'] ?? true)) {
-            $filterParts[] = '['.$base.']subtitles=filename='.$this->filterValue($subtitlePath).
-                ':force_style='.$this->filterValue('FontName=Noto Kufi Arabic,FontSize=26,Outline=2,Shadow=0,Alignment=2,MarginV=100').'[subtitled]';
-            $base = 'subtitled';
         }
 
         $filterParts[] = '['.$base.']format=yuv420p[vout]';
@@ -182,12 +173,13 @@ class FfmpegCommandBuilder
         return [
             (string) config('studio.engine.ffmpeg_bin', 'ffmpeg'),
             ...$inputs,
+            '-filter_complex_threads', '1',
             '-filter_complex', implode(';', $filterParts),
             '-map', '[vout]',
             '-map', '[aout]',
             '-t', $this->number($duration),
             '-r', (string) $fps,
-            '-threads', '2',
+            '-threads', '1',
             '-c:v', 'libx264',
             '-preset', (int) ($options['quality'] ?? 1080) === 720 ? 'veryfast' : 'medium',
             '-crf', (int) ($options['quality'] ?? 1080) === 720 ? '26' : '21',
@@ -208,42 +200,26 @@ class FfmpegCommandBuilder
         if ($font === '') {
             $font = base_path('../python_engine/fonts/NotoKufiArabic.ttf');
         }
-        $fontScale = max(80, min(130, (int) ($options['font_scale'] ?? 100)));
 
         // Generate ASS subtitle file for preview using AssOverlayBuilder
-        $assBuilder = new AssOverlayBuilder();
+        $assBuilder = new AssOverlayBuilder;
         $assContent = $assBuilder->build([
-            'headline' => trim((string) ($options['headline'] ?? $textFiles['headline'] ?? '')),
-            'points'   => is_array($textFiles['points'] ?? []) ? array_values($textFiles['points']) : [],
-            'cta'      => trim((string) ($textFiles['cta'] ?? $options['cta'] ?? '')),
-            'handle'   => trim((string) ($textFiles['handle'] ?? $options['handle'] ?? '')),
+            'headline' => $this->textSource($options['headline'] ?? $textFiles['headline'] ?? ''),
+            'points' => $this->textSources($options['custom_points'] ?? $textFiles['points'] ?? []),
+            'cta' => $this->textSource($options['cta'] ?? $textFiles['cta'] ?? ''),
+            'handle' => $this->textSource($options['handle'] ?? $textFiles['handle'] ?? ''),
         ], $options, $width, $height, 10.0);
 
         $assPath = tempnam(sys_get_temp_dir(), 'ass_').'.ass';
         file_put_contents($assPath, $assContent);
 
-        // Use subtitles filter with ASS file instead of drawtext
+        // A single subtitles filter chain: the ASS file already contains every
+        // text block, so captions must not be burned in a second time.
         $filters = [];
-        // All text now comes from the ASS file via subtitles filter
-        // We still need to track the base filter graph state
-        $base = 'joined';
-
-        if ($assPath !== null && is_file($assPath)) {
-            $filters[] = '['.$base.']subtitles=filename='.$this->filterValue($assPath).
-                ':force_style="FontName='.$font.',FontSize='.$this->fontSize($height, $fontScale, 0.052).',Outline=2,Shadow=0,Alignment=2,MarginV=40"'.
-                '[headlined]';
-            $base = 'headlined';
+        if (is_file($assPath)) {
+            $filters[] = 'subtitles=filename='.$this->filterValue($assPath).$this->fontsDirectoryOption($font);
         }
-
-        // Captions aren't typically needed for preview, but if enabled, add subtitles
-        if ((bool) ($options['captions'] ?? true)) {
-            $subtitlePath = $options['_subtitle_path'] ?? null;
-            if ($subtitlePath !== null && is_file($subtitlePath)) {
-                $filters[] = '['.$base.']subtitles=filename='.$this->filterValue($subtitlePath).
-                    ':force_style='.$this->filterValue('FontName=Noto Kufi Arabic,FontSize=26,Outline=2,Shadow=0,Alignment=2,MarginV=100').'[subtitled]';
-                $base = 'subtitled';
-            }
-        }
+        $filters[] = 'format=yuv420p';
 
         return [
             (string) config('studio.engine.ffmpeg_bin', 'ffmpeg'),
@@ -335,6 +311,34 @@ class FfmpegCommandBuilder
         return preg_match('/^#[0-9a-fA-F]{6}$/', $color) === 1 ? $color : '#fb7185';
     }
 
+    private function textSource(mixed $value): string
+    {
+        if (is_string($value) && $value !== '' && is_file($value)) {
+            return trim((string) file_get_contents($value));
+        }
+
+        return is_scalar($value) ? trim((string) $value) : '';
+    }
+
+    /** @return list<string> */
+    private function textSources(mixed $values): array
+    {
+        $texts = [];
+        foreach ((array) $values as $value) {
+            $text = $this->textSource($value);
+            if ($text !== '') {
+                $texts[] = $text;
+            }
+        }
+
+        return $texts;
+    }
+
+    private function fontsDirectoryOption(string $font): string
+    {
+        return is_file($font) ? ':fontsdir='.$this->filterValue(dirname($font)) : '';
+    }
+
     private function filterValue(string $value): string
     {
         $escaped = str_replace(
@@ -344,11 +348,6 @@ class FfmpegCommandBuilder
         );
 
         return "'".$escaped."'";
-    }
-
-    private function fontSize(int $height, int $scale, float $ratio): int
-    {
-        return max(24, (int) round($height * $ratio * max(80, min(130, $scale)) / 100));
     }
 
     private function number(float $value): string

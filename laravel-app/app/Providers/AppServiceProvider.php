@@ -2,6 +2,9 @@
 
 namespace App\Providers;
 
+use App\Services\FfmpegReelRenderer;
+use App\Services\PythonReelRenderer;
+use App\Services\RenderEngine;
 use App\Services\SecretManager;
 use App\Services\SecretStore;
 use App\Support\StudioPaths;
@@ -9,6 +12,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -19,6 +23,14 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(SecretStore::class, fn () => new (SecretManager::defaultStoreClass()));
         $this->app->scoped(SecretManager::class);
+
+        $this->app->bind(RenderEngine::class, function ($app): RenderEngine {
+            return match (config('studio.engine.driver', 'ffmpeg')) {
+                'python' => $app->make(PythonReelRenderer::class),
+                'ffmpeg' => $app->make(FfmpegReelRenderer::class),
+                default => throw new InvalidArgumentException('Unsupported render driver: '.config('studio.engine.driver')),
+            };
+        });
     }
 
     /**

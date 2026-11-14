@@ -10,10 +10,12 @@ use App\Services\FactCheckService;
 use App\Services\GeminiContentService;
 use App\Services\ProviderKeyRing;
 use App\Services\ReelQualityAnalyzer;
+use App\Services\RenderEngine;
 use App\Support\StudioPaths;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -136,27 +138,7 @@ class ReelController extends Controller
             'aspect_ratio' => ['nullable', Rule::in(['9:16', '1:1', '16:9'])],
         ]);
 
-        $python = (string) config('studio.engine.python_bin');
-        $script = (string) config('studio.engine.script');
-
-        if (! is_file($python) || ! is_executable($python) || ! is_file($script)) {
-            return response()->json([
-                'status' => 'error',
-                'message' => trans('studio.errors.engine_missing', [], $validated['language'] ?? 'ar'),
-            ], 502);
-        }
-
-        Storage::disk('public')->makeDirectory('previews');
-        foreach (Storage::disk('public')->files('previews') as $oldPreview) {
-            if (Storage::disk('public')->lastModified($oldPreview) < now()->subHour()->timestamp) {
-                Storage::disk('public')->delete($oldPreview);
-            }
-        }
-
-        $relativePath = 'previews/'.Str::uuid().'.png';
-        $absolutePath = StudioPaths::videos().'/'.$relativePath;
-        @mkdir(dirname($absolutePath), 0755, true);
-
+        $language = $validated['language'] ?? 'ar';
         $headline = trim((string) ($validated['headline'] ?? ''));
         $points = [];
         foreach (['line1', 'line2', 'line3'] as $field) {
@@ -166,49 +148,44 @@ class ReelController extends Controller
             }
         }
 
-        $command = [
-            $python,
-            $script,
-            '--preview-image', $absolutePath,
-            '--topic', $headline !== '' ? $headline : 'preview',
-            '--language', (string) ($validated['language'] ?? 'ar'),
-            '--template', (string) ($validated['template'] ?? 'classic'),
-            '--handle', (string) ($validated['handle'] ?? ''),
-            '--accent-color', (string) ($validated['accent_color'] ?? '#fb7185'),
-            '--font-scale', (string) (int) ($validated['font_scale'] ?? 100),
-            '--quality', (string) (int) ($validated['quality'] ?? 1080),
-            '--aspect-ratio', (string) ($validated['aspect_ratio'] ?? '9:16'),
-            '--anti-border',
-        ];
+        $template = (string) ($validated['template'] ?? 'classic');
+        $handle = trim((string) ($validated['handle'] ?? ''));
+        $accentColor = (string) ($validated['accent_color'] ?? '#fb7185');
+        $fontScale = (int) ($validated['font_scale'] ?? 100);
+        $quality = (int) ($validated['quality'] ?? 1080);
+        $aspectRatio = (string) ($validated['aspect_ratio'] ?? '9:16');
 
-        if ($headline !== '') {
-            $command[] = '--custom-headline';
-            $command[] = $headline;
-        }
+        $renderer = app(RenderEngine::class);
 
-        if ($points !== []) {
-            $command[] = '--custom-points';
-            foreach ($points as $point) {
-                $command[] = $point;
+        Storage::disk('public')->makeDirectory('previews');
+        foreach (Storage::disk('public')->files('previews') as $oldPreview) {
+            if (Storage::disk('public')->lastModified($oldPreview) < now()->subHour()->timestamp) {
+                Storage::disk('public')->delete($oldPreview);
             }
         }
 
-        $process = new Process($command, base_path('../'), [
-            'AIVIDEO_ARABIC_FONT' => (string) config('studio.engine.arabic_font', ''),
-        ]);
-        $process->setTimeout(60);
+        $relativePath = 'previews/'.Str::uuid().'.png';
+        $absolutePath = storage_path('app/public/'.$relativePath);
+        @mkdir(dirname($absolutePath), 0755, true);
 
         try {
-            $process->run();
+            $renderer->renderPreview([
+                'headline' => $headline,
+                'custom_points' => $points,
+                'handle' => $handle,
+                'language' => $language,
+                'accent_color' => $accentColor,
+                'font_scale' => $fontScale,
+                'template' => $template,
+                'quality' => (string) $quality,
+                'aspect_ratio' => $aspectRatio,
+                'captions' => false,
+            ], $absolutePath);
         } catch (\Throwable $exception) {
-            logger()->warning('Preview render crashed.', ['error' => $exception->getMessage()]);
-            @unlink($absolutePath);
-
-            return response()->json(['status' => 'error', 'message' => 'Preview render timed out.'], 502);
+            Log::error('Preview render failed', ['error' => $exception->getMessage()]);
         }
 
-        if (! $process->isSuccessful() || ! is_file($absolutePath)) {
-            logger()->warning('Preview render failed.', ['output' => Str::limit($process->getErrorOutput(), 800)]);
+        if (! is_file($absolutePath) || (filesize($absolutePath) ?: 0) < 8) {
             @unlink($absolutePath);
 
             return response()->json(['status' => 'error', 'message' => 'Preview render failed.'], 502);

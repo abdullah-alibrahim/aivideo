@@ -22,6 +22,8 @@ class StudioPathsTest extends TestCase
             $this->markTestSkipped('macOS-specific default');
         }
 
+        config(['studio.data_dir' => null]);
+
         $expected = $_SERVER['HOME'] ?? $_ENV['HOME'] ?? getenv('HOME');
         $this->assertSame(
             $expected.'/Library/Application Support/AI Reels Studio',

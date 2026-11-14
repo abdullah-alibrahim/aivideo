@@ -27,21 +27,61 @@ aivideo/
 ├── venv/                      # البيئة الافتراضية للبايثون
 ├── scripts/                   # النسخ والاستعادة
 ├── .github/workflows/ci.yml   # الاختبارات الآلية
-├── start.sh                   # سكربت تشغيل المنصة
+├── install.command / install.cmd # تثبيت وتشغيل بنقرة واحدة
+├── setup.sh / setup.ps1          # إعداد الاعتماديات لأول مرة
+├── start.sh / start.ps1          # تشغيل المنصة
 └── README.md
 ```
 
-## التشغيل السريع
+## التشغيل السريع على macOS / Linux
 
 ```bash
-chmod +x start.sh
+./setup.sh
 ./start.sh
 ```
 
 ثم افتح `http://127.0.0.1:8000`.
 
+### نسخة macOS كتطبيق
+
+توجد نسخة جاهزة باسم **AI Reels Studio.app** داخل مجلد `outputs/`. اسحب التطبيق إلى
+مجلد `Applications` ثم افتحه. في أول تشغيل ينسخ ملفات المشروع إلى
+`~/AI Reels Studio`، يثبت الاعتماديات، ثم يفتح Terminal ويشغل الخادم والـQueue.
+يمكن أيضاً استخدام ملف `AI Reels Studio.app.zip` إذا كان النقل أو المشاركة أسهل.
+
 يشغّل `start.sh` خادم Laravel وعامل طابور (`queue:work`) معاً. الرندر لا يحدث داخل طلب الويب:
 يُعاد الرد فوراً بحالة `queued`، ويتابع عامل الطابور العمل ويعرض تقدّماً حقيقياً في الواجهة.
+
+## التشغيل السريع على Windows
+
+ثبّت PHP 8.3+ مع إضافات `mbstring`, `fileinfo`, و`PDO SQLite`، ثم Composer، Node.js 20+،
+وPython 3.11+، وأضفها إلى `PATH`. افتح PowerShell داخل مجلد المشروع ونفّذ:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\setup.ps1
+.\start.ps1
+```
+
+للتثبيت المباشر الأسهل، انقر مرتين على `install.cmd`؛ سيقوم بتثبيت الاعتماديات
+وتوليد المفتاح وتجهيز قاعدة البيانات ثم تشغيل الموقع تلقائياً. يستخدم المشروع تلقائياً
+`venv\\Scripts\\python.exe` على Windows و`venv/bin/python3` على macOS/Linux؛ لا تعدّل
+الكود لتغيير الفواصل. إذا كان Python في مسار مخصص، ضع المسار الكامل في `.env`:
+
+```env
+AIVIDEO_PYTHON_BIN=C:\\path\\to\\aivideo\\venv\\Scripts\\python.exe
+```
+
+في كلا النظامين افتح `http://127.0.0.1:8000`. أوقف الخادم بـ `Ctrl+C`؛ وسيتم إيقاف
+عامل الطابور والـScheduler معه.
+
+على macOS يمكن النقر مرتين على `install.command`. إذا منع macOS التشغيل، نفّذ مرة واحدة:
+
+```bash
+chmod +x install.command setup.sh start.sh
+```
+
+بعد ذلك افتح `install.command` مرة أخرى؛ سيُفتح Terminal ويبدأ الموقع بعد اكتمال التثبيت.
 
 من شريط التنقل افتح **Dashboard / التحليلات** لعرض الإنتاج اليومي، حالات الرندر، اللغات، المجالات، القوالب، متوسط المدة، وآخر الريلز والمجموعات.
 
@@ -91,10 +131,10 @@ php artisan reels:recover-stale
 
 يتحقق السكربت من الاعتماديات، يشغل migrations و`studio:doctor`، يبني أصول الواجهة، ويرفض وضع production إذا كان debug مفعّلًا.
 
-## Fresh installation
+## Fresh installation (manual)
 
 ```bash
-# PHP 8.3+ with mbstring, PDO SQLite, and fileinfo
+# macOS/Linux: PHP 8.3+ with mbstring, PDO SQLite, and fileinfo
 cd laravel-app
 composer install
 cp .env.example .env
@@ -110,7 +150,17 @@ python3 -m venv venv
 cd laravel-app && npm run build && cd ..
 ```
 
-المتحكم يتوقع المحرك في `../venv/bin/python3`. ثبت FFmpeg وتحقق من توفره لـ MoviePy.
+في Windows استبدل أوامر Python السابقة بـ:
+
+```powershell
+py -3 -m venv venv
+.\venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+```
+
+يكتشف Laravel المسار المناسب تلقائياً من نظام التشغيل، ويمكن تجاوزه عبر
+`AIVIDEO_PYTHON_BIN`. يعتمد المحرك على `imageio-ffmpeg` من ملف المتطلبات؛ إذا كان
+التثبيت المحلي يحتاج FFmpeg نظامياً، ثبته وأضفه إلى `PATH` (على macOS عبر Homebrew،
+وعلى Windows عبر توزيعة FFmpeg موثوقة).
 
 المحرك يحمل خط **Noto Kufi Arabic** المرخّص (OFL) داخل `python_engine/fonts/` ويستخدمه افتراضياً،
 لذا لا يحتاج خادم Linux إلى تثبيت خط إضافي. لتغيير الخط:
