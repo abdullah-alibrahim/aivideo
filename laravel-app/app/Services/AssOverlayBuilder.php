@@ -22,9 +22,12 @@ class AssOverlayBuilder
         $height = max(240, $height);
         $duration = max(1.0, $duration);
 
-        $family = trim((string) ($options['font_family'] ?? 'Noto Kufi Arabic'));
-        if ($family === '') {
-            $family = 'Noto Kufi Arabic';
+        $configuredFonts = config('studio.engine.arabic_fonts', []);
+        $configuredFamily = config('studio.engine.arabic_font', 'Noto Kufi Arabic');
+
+        $family = trim((string) ($options['font_family'] ?? $configuredFamily));
+        if ($family === '' || ! array_key_exists($family, $configuredFonts)) {
+            $family = $configuredFamily;
         }
 
         $scale = max(80, min(130, (int) ($options['font_scale'] ?? 100))) / 100;
@@ -56,22 +59,25 @@ class AssOverlayBuilder
         $dialogue = [];
 
         $headlineEnd = $points !== [] ? min($duration, max(2.5, $duration * 0.34)) : max(2.5, $duration - 2.0);
-        $this->addEvent($dialogue, $headline, 'Headline', 0.0, min($duration, $headlineEnd), $anchors['Headline'], $width);
+        $x = (int) round($width / 2);
+        $wordByWord = ! empty($options['hook_word_by_word']);
+        $effect = $this->effect((string) ($options['text_effect'] ?? ''), $anchors['Headline'], $x);
+        $this->addEvent($dialogue, $headline, 'Headline', 0.0, min($duration, $headlineEnd), $anchors['Headline'], $width, $effect, $wordByWord);
 
         if ($points !== []) {
             $start = min($duration, $headlineEnd);
             $end = max($start, $duration - 2.0);
-            $span = max(0.1, $end - $start);
-            $step = $span / count($points);
-            foreach ($points as $index => $point) {
-                $pointStart = $start + ($index * $step);
-                $this->addEvent($dialogue, $point, 'Points', $pointStart, $pointStart + $step, $anchors['Points'], $width);
+            foreach ((new CaptionTimeline)->allocate($points, $start, $end) as $segment) {
+                $pointEffect = $this->effect((string) ($options['text_effect'] ?? ''), $anchors['Points'], $x);
+                $this->addEvent($dialogue, $segment['text'], 'Points', $segment['start'], $segment['end'], $anchors['Points'], $width, $pointEffect, $wordByWord);
             }
         }
 
         $ctaStart = max(0.0, $duration - 2.0);
-        $this->addEvent($dialogue, $cta, 'CTA', $ctaStart, $duration, $anchors['CTA'], $width);
-        $this->addEvent($dialogue, $handle, 'Handle', 0.0, $duration, $anchors['Handle'], $width);
+        $ctaEffect = $this->effect((string) ($options['text_effect'] ?? ''), $anchors['CTA'], $x);
+        $this->addEvent($dialogue, $cta, 'CTA', $ctaStart, $duration, $anchors['CTA'], $width, $ctaEffect);
+        $handleEffect = $this->effect((string) ($options['text_effect'] ?? ''), $anchors['Handle'], $x);
+        $this->addEvent($dialogue, $handle, 'Handle', 0.0, $duration, $anchors['Handle'], $width, $handleEffect);
 
         $lines = [
             '[Script Info]',
@@ -101,21 +107,42 @@ class AssOverlayBuilder
     /**
      * @param  list<string>  $dialogue
      */
-    private function addEvent(array &$dialogue, string $text, string $style, float $start, float $end, int $anchorY, int $width): void
+    private function addEvent(array &$dialogue, string $text, string $style, float $start, float $end, int $anchorY, int $width, string $effect = '', bool $wordByWord = false): void
     {
         if ($text === '') {
             return;
         }
 
+        $formattedText = $wordByWord ? $this->formatWordByWord($text) : $this->escape($text);
+
         $dialogue[] = sprintf(
-            'Dialogue: 0,%s,%s,%s,,0,0,0,,{\an5\pos(%d,%d)}%s',
+            'Dialogue: 0,%s,%s,%s,,0,0,0,,%s{\an5\pos(%d,%d)}%s',
             $this->timestamp($start),
             $this->timestamp(max($start + 0.1, $end)),
             $style,
+            $effect,
             (int) round($width / 2),
             $anchorY,
-            $this->escape($text),
+            $formattedText,
         );
+    }
+
+    /**
+     * Build ASS effect tags for a text block.
+     *
+     * Supported effects:
+     *   - fade_in   : \fad(500,0)          fade in over 0.5s
+     *   - slide_up  : \move(x,anchorY+120,x,anchorY,0,400) slide up from below
+     *   - pop_up    : \t(0,250,\fscx150\fscy150)\t(250,500,\fscx100\fscy100)
+     */
+    private function effect(string $name, int $anchorY, int $x): string
+    {
+        return match ($name) {
+            'fade_in' => '{\fad(500,0)}',
+            'slide_up' => '{\move('.$x.','.($anchorY + 120).','.$x.','.$anchorY.',0,400)}',
+            'pop_up' => '{\t(0,250,\fscx150\fscy150)\\t(250,500,\fscx100\fscy100)}',
+            default => '',
+        };
     }
 
     private function style(string $name, string $family, int $fontSize, string $primary, string $outline, int $bold, int $outlineWidth, int $shadow, int $encoding, int $width): string
@@ -159,5 +186,22 @@ class AssOverlayBuilder
         $remaining = $total % 6000;
 
         return sprintf('%d:%02d:%02d.%02d', $hours, $minutes, intdiv($remaining, 100), $remaining % 100);
+    }
+
+    private function formatWordByWord(string $text): string
+    {
+        $words = preg_split('/\s+/u', trim($text)) ?: [];
+        if (count($words) <= 1) {
+            return $this->escape($text);
+        }
+
+        return implode(' ', array_map(function (string $word, int $index): string {
+            $escaped = $this->escape($word);
+            if ($index === 0) {
+                return "{\\1c&H0070FF&}" . $escaped . "{\\1c&HFFFFFF&}";
+            }
+
+            return $escaped;
+        }, $words, array_keys($words)));
     }
 }

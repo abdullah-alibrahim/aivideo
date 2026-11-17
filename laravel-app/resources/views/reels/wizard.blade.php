@@ -2,6 +2,9 @@
 @php
     $isAr = ($lang ?? 'ar') === 'ar';
     $dir = $isAr ? 'rtl' : 'ltr';
+    $wizardStepNames = $isAr
+        ? ['معلومات الفيديو', 'الفكرة', 'الهوك', 'النص', 'التصميم', 'تقييم الفيديو', 'المعاينة والتصدير']
+        : ['Video details', 'The idea', 'Opening hook', 'Script', 'Design', 'Quality check', 'Preview and export'];
     $qualityCopy = [
         'ready' => trans('studio.quality.ready', [], $lang),
         'review' => trans('studio.quality.review', [], $lang),
@@ -24,10 +27,24 @@
 
     <style>
         body {
-            font-family: 'Cairo', 'Plus Jakarta Sans', sans-serif;
+            font-family: sans-serif;
             background: #070b12;
             color: #f1f5f9;
             min-height: 100vh;
+            font-size: 15px;
+            line-height: 1.6;
+        }
+        html[lang="ar"] body {
+            font-family: 'Cairo', 'Plus Jakarta Sans', sans-serif;
+        }
+        html[lang="en"] body {
+            font-family: 'Plus Jakarta Sans', 'Cairo', sans-serif;
+        }
+        body p[class~="text-[9px]"],
+        body p[class~="text-[10px]"],
+        body p[class~="text-[11px]"] {
+            font-size: 0.75rem;
+            line-height: 1.55;
         }
         .step-tab-btn {
             padding: 0.45rem 0.95rem;
@@ -154,6 +171,25 @@
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
         }
+        @media (max-width: 768px) {
+            [data-background-option] {
+                animation-delay: 0s !important;
+            }
+            .background-picker-grid,
+            [data-background-picker] .grid {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 0.75rem !important;
+            }
+            .reel-preview-frame,
+            #step4PreviewBox,
+            #liveDesignCardBox,
+            #step7PreviewCard {
+                height: 200px;
+                min-height: 200px;
+            }
+            .studio-card { padding: 1rem; }
+            h1, h2, h3 { font-size: 1.1rem; }
+        }
         .toggle-switch {
             position: relative;
             display: inline-block;
@@ -260,7 +296,22 @@
                 <button type="button" onclick="goToStep(7)" id="stepTab7" class="step-tab-btn">7 المعاينة والتصدير</button>
             </div>
 
+            <div id="wizardStepProgress" class="lg:hidden w-full basis-full pt-1">
+                <div class="mb-2 flex items-center justify-between gap-3 text-xs">
+                    <span id="wizardStepProgressCount" aria-live="polite" class="font-bold text-white">{{ $isAr ? 'الخطوة 1 من 7' : 'Step 1 of 7' }}</span>
+                    <span id="wizardStepProgressName" class="truncate text-slate-300">{{ $isAr ? 'معلومات الفيديو' : 'Video details' }}</span>
+                </div>
+                <div id="wizardStepProgressBar" dir="{{ $dir }}" role="progressbar" aria-label="{{ $isAr ? 'تقدم خطوات الويزارد' : 'Wizard step progress' }}" aria-valuemin="1" aria-valuemax="7" aria-valuenow="1" aria-valuetext="{{ $isAr ? 'الخطوة 1 من 7: معلومات الفيديو' : 'Step 1 of 7: Video details' }}" class="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                    <div id="wizardStepProgressFill" class="h-full rounded-full bg-amber-400 transition-[width] duration-300" style="width: 14.2857%"></div>
+                </div>
+            </div>
+
             <div class="flex items-center gap-2 sm:gap-3">
+                @if (auth()->user()?->isStudioAdmin())
+                <a href="{{ route('admin.users', ['lang' => $lang ?? 'ar']) }}" aria-label="{{ $isAr ? 'إدارة المستخدمين' : 'Manage users' }}" class="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-slate-800 px-2.5 sm:px-3 py-2 text-[11px] font-bold text-emerald-200 transition hover:bg-slate-700">
+                    <i class="fa-solid fa-users"></i>
+                    <span class="hidden sm:inline">{{ $isAr ? 'المستخدمون' : 'Users' }}</span>
+                </a>
                 <a href="{{ route('settings.provider-keys', ['lang' => $lang ?? 'ar']) }}" aria-label="إدارة المفاتيح" class="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-2.5 sm:px-3 py-2 text-[11px] font-bold text-slate-200 transition hover:bg-slate-700">
                     <i class="fa-solid fa-key text-amber-400"></i>
                     <span class="hidden sm:inline">إدارة المفاتيح</span>
@@ -269,6 +320,7 @@
                     <i class="fa-solid fa-chart-line"></i>
                     <span class="hidden sm:inline">{{ $isAr ? 'التحليلات' : 'Analytics' }}</span>
                 </a>
+                @endif
                 <div class="hidden sm:flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-bold text-amber-400">
                     <i class="fa-solid fa-coins"></i>
                     <span>تجميع محلي</span>
@@ -283,7 +335,7 @@
         <div id="wizardStatus" class="hidden mb-5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200" role="status" aria-live="polite"></div>
 
         <div class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-[11px] text-slate-400">
-            <p id="wizardDraftStatus" role="status" aria-live="polite">{{ $isAr ? 'تُحفظ تغييرات الويزارد محلياً في هذا المتصفح. لا تُحفظ الملفات أو مفاتيح API المؤقتة.' : 'Wizard changes are saved locally in this browser. Uploaded files and temporary API keys are not saved.' }}</p>
+            <p id="wizardDraftStatus" role="status" aria-live="polite">{{ $isAr ? 'تُحفظ تغييرات الويزارد محلياً في هذا المتصفح. لا تُحفظ الملفات.' : 'Wizard changes are saved locally in this browser. Uploaded files are not saved.' }}</p>
             <div class="flex flex-wrap items-center gap-2">
                 <select id="wizardPresetSelect" class="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[11px] text-slate-300" aria-label="{{ $isAr ? 'اختيار إعداد محفوظ' : 'Choose saved preset' }}">
                     <option value="">{{ $isAr ? 'الإعدادات المحفوظة' : 'Saved presets' }}</option>
@@ -293,35 +345,6 @@
                 <button type="button" id="clearWizardDraft" class="rounded-lg border border-slate-700 px-3 py-1.5 font-bold text-slate-300 hover:border-amber-400 hover:text-white">{{ $isAr ? 'مسح المسودة' : 'Clear draft' }}</button>
             </div>
         </div>
-
-        @php
-            $readinessLabels = $isAr
-                ? ['gemini' => 'Gemini API', 'elevenlabs' => 'ElevenLabs API', 'python' => 'Python engine', 'ffmpeg' => 'FFmpeg', 'storage' => 'التخزين والصلاحيات']
-                : ['gemini' => 'Gemini API', 'elevenlabs' => 'ElevenLabs API', 'python' => 'Python engine', 'ffmpeg' => 'FFmpeg', 'storage' => 'Storage & permissions'];
-            $readyCount = collect(['gemini', 'elevenlabs', 'python', 'ffmpeg', 'storage'])->filter(fn ($key) => (bool) ($readiness[$key] ?? false))->count();
-            $allReady = $readyCount === 5;
-        @endphp
-        <section class="mb-6 rounded-2xl border {{ $allReady ? 'border-emerald-500/30 bg-emerald-950/20' : 'border-amber-500/30 bg-amber-950/15' }} p-4 sm:p-5" aria-labelledby="readinessTitle">
-            <div class="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <p class="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">{{ $isAr ? 'جاهزية الاستوديو' : 'Studio readiness' }}</p>
-                    <h2 id="readinessTitle" class="mt-1 text-base font-black text-white">{{ $allReady ? ($isAr ? 'كل شيء جاهز للتوليد' : 'Everything is ready to render') : ($isAr ? 'أكمل الإعداد قبل التوليد' : 'Complete setup before rendering') }}</h2>
-                    <p class="mt-1 text-xs text-slate-400">{{ $readyCount }}/5 {{ $isAr ? 'فحوصات ناجحة' : 'checks passed' }}@if(!empty($readiness['storage_label'])) · {{ $readiness['storage_label'] }}@endif</p>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                    <a href="{{ route('settings.provider-keys', ['lang' => $lang ?? 'ar']) }}" class="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] font-bold text-sky-200 hover:bg-sky-500/20"><i class="fa-solid fa-key me-1"></i>{{ $isAr ? 'إعداد المفاتيح' : 'Configure APIs' }}</a>
-                    <button type="button" onclick="window.location.reload()" class="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-[11px] font-bold text-slate-300 hover:border-amber-400 hover:text-white"><i class="fa-solid fa-rotate me-1"></i>{{ $isAr ? 'إعادة الفحص' : 'Recheck' }}</button>
-                </div>
-            </div>
-            <div class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                @foreach($readinessLabels as $key => $label)
-                    @php($passed = (bool) ($readiness[$key] ?? false))
-                    <div class="flex items-center gap-2 rounded-xl border {{ $passed ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-200' : 'border-rose-500/20 bg-rose-500/5 text-rose-200' }} px-3 py-2 text-[11px] font-bold">
-                        <i class="fa-solid {{ $passed ? 'fa-circle-check' : 'fa-circle-xmark' }}"></i><span>{{ $label }}</span>
-                    </div>
-                @endforeach
-            </div>
-        </section>
 
         @if ($errors->any())
             <div class="mb-5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-100" role="alert" tabindex="-1" id="serverValidationErrors">
@@ -340,8 +363,8 @@
 
             <!-- Hidden Inputs to carry dynamic values -->
             <input type="hidden" name="hook_headline" id="hiddenHookHeadline" value="">
-            <input type="hidden" name="template" id="hiddenTemplate" value="classic">
-            <input type="hidden" name="accent_color" id="hiddenAccentColor" value="#fb7185">
+            <input type="hidden" name="template" id="hiddenTemplate" value="cinematic">
+            <input type="hidden" name="accent_color" id="hiddenAccentColor" value="#D6B87A">
 
             <!-- ================= STEP 1: معلومات الفيديو ================= -->
             <div id="stepContainer1" class="space-y-6">
@@ -391,13 +414,12 @@
                     </div>
 
                     <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
-                        <label class="option-pill text-center block" onclick="selectDuration(5, this)"><input type="radio" name="duration" value="5" class="sr-only"><span class="text-xl font-black text-white block">5</span><span class="text-[11px] text-slate-400 block">ثواني</span><span class="text-[9px] text-amber-400 block mt-1">سريع</span></label>
-                        <label class="option-pill text-center block active border-amber-500" onclick="selectDuration(10, this)"><input type="radio" name="duration" value="10" checked class="sr-only"><span class="text-xl font-black text-white block">10</span><span class="text-[11px] text-slate-400 block">ثانية</span><span class="text-[9px] text-emerald-400 block mt-1">مباشر</span></label>
+                        <label class="option-pill text-center block" onclick="selectDuration(10, this)"><input type="radio" name="duration" value="10" class="sr-only"><span class="text-xl font-black text-white block">10</span><span class="text-[11px] text-slate-400 block">ثانية</span><span class="text-[9px] text-emerald-400 block mt-1">مباشر</span></label>
                         <label class="option-pill text-center block" onclick="selectDuration(15, this)"><input type="radio" name="duration" value="15" class="sr-only"><span class="text-xl font-black text-white block">15</span><span class="text-[11px] text-slate-400 block">ثانية</span><span class="text-[9px] text-slate-400 block mt-1">قائمة قصيرة</span></label>
                         <label class="option-pill text-center block" onclick="selectDuration(20, this)"><input type="radio" name="duration" value="20" class="sr-only"><span class="text-xl font-black text-white block">20</span><span class="text-[11px] text-slate-400 block">ثانية</span><span class="text-[9px] text-indigo-400 block mt-1">الأنسب</span></label>
                         <label class="option-pill text-center block" onclick="selectDuration(30, this)"><input type="radio" name="duration" value="30" class="sr-only"><span class="text-xl font-black text-white block">30</span><span class="text-[11px] text-slate-400 block">ثانية</span><span class="text-[9px] text-purple-400 block mt-1">تفاصيل</span></label>
                         <label class="option-pill text-center block" onclick="selectDuration(40, this)"><input type="radio" name="duration" value="40" class="sr-only"><span class="text-xl font-black text-white block">40</span><span class="text-[11px] text-slate-400 block">ثانية</span><span class="text-[9px] text-pink-400 block mt-1">كاملة</span></label>
-                        <label class="option-pill text-center block" onclick="selectDuration(60, this)"><input type="radio" name="duration" value="60" class="sr-only"><span class="text-xl font-black text-white block">60</span><span class="text-[11px] text-slate-400 block">ثانية</span><span class="text-[9px] text-rose-400 block mt-1">مفصلة</span></label>
+                        <label class="option-pill text-center block active border-amber-500" onclick="selectDuration(60, this)"><input type="radio" name="duration" value="60" checked class="sr-only"><span class="text-xl font-black text-white block">60</span><span class="text-[11px] text-slate-400 block">ثانية</span><span class="text-[9px] text-rose-400 block mt-1">مفصلة</span></label>
                     </div>
                 </div>
 
@@ -477,12 +499,6 @@
                             <option value="story">قصة</option>
                         </select>
                     </div>
-                </div>
-
-                <div class="space-y-3 pt-2 border-t border-slate-800">
-                    <label class="block text-xs font-bold text-slate-300 mb-1">مفاتيح Gemini لهذه العملية (مطلوبة إذا لم تحفظ مفتاحاً)</label>
-                    <textarea name="gemini_keys" rows="2" class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono"></textarea>
-                    <p class="text-[10px] leading-relaxed text-slate-400">تُستخدم مفاتيح Gemini النشطة المحفوظة تلقائياً؛ يمكنك إضافة مفاتيح مؤقتة لهذه العملية. لإدارتها اضغط «إدارة المفاتيح» بالأعلى. قد تُحتسب الطلبات لدى المزود.</p>
                 </div>
 
                 <button type="button" onclick="triggerAiIdea()" class="w-full py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base transition shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2">
@@ -597,9 +613,18 @@
                                 </div>
                             </div>
 
-                            <label for="inputLine1" class="sr-only">النقطة الأولى</label><input type="text" name="line1" id="inputLine1" value="{{ $isAr ? 'حدّد خطوة واحدة واضحة للبدء.' : 'Choose one clear action to begin.' }}" aria-label="النقطة الأولى" oninput="updateScriptPreview()" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-semibold">
-                            <label for="inputLine2" class="sr-only">النقطة الثانية</label><input type="text" name="line2" id="inputLine2" value="{{ $isAr ? 'قسّم الفكرة إلى خطوات صغيرة قابلة للتكرار.' : 'Break the idea into small steps you can repeat.' }}" aria-label="النقطة الثانية" oninput="updateScriptPreview()" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
-                            <label for="inputLine3" class="sr-only">النقطة الثالثة</label><input type="text" name="line3" id="inputLine3" value="{{ $isAr ? 'راجع ما نجح وعدّل خطوتك التالية.' : 'Review what worked and adjust your next step.' }}" aria-label="النقطة الثالثة" oninput="updateScriptPreview()" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
+                            <div class="space-y-1.5">
+                                <label for="inputLine1" class="block text-xs font-bold text-slate-300">{{ $isAr ? 'النقطة الأولى' : 'Script point 1' }}</label>
+                                <input type="text" name="line1" id="inputLine1" value="{{ $isAr ? 'حدّد خطوة واحدة واضحة للبدء.' : 'Choose one clear action to begin.' }}" oninput="updateScriptPreview()" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm font-semibold leading-relaxed">
+                            </div>
+                            <div class="space-y-1.5">
+                                <label for="inputLine2" class="block text-xs font-bold text-slate-300">{{ $isAr ? 'النقطة الثانية' : 'Script point 2' }}</label>
+                                <input type="text" name="line2" id="inputLine2" value="{{ $isAr ? 'قسّم الفكرة إلى خطوات صغيرة قابلة للتكرار.' : 'Break the idea into small steps you can repeat.' }}" oninput="updateScriptPreview()" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm leading-relaxed">
+                            </div>
+                            <div class="space-y-1.5">
+                                <label for="inputLine3" class="block text-xs font-bold text-slate-300">{{ $isAr ? 'النقطة الثالثة' : 'Script point 3' }}</label>
+                                <input type="text" name="line3" id="inputLine3" value="{{ $isAr ? 'راجع ما نجح وعدّل خطوتك التالية.' : 'Review what worked and adjust your next step.' }}" oninput="updateScriptPreview()" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm leading-relaxed">
+                            </div>
 
                             <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-start gap-2">
                                 <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
@@ -692,14 +717,14 @@
                             <div>
                                 <label for="motionPreset" class="block text-xs font-bold text-slate-300 mb-1.5">{{ $isAr ? 'مكتبة المشاهد والحركة' : 'Scene & motion library' }}</label>
                                 <select id="motionPreset" name="motion_preset" onchange="applyMotionPreset(this.value)" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-amber-500/30 text-white text-xs">
-                                    <option value="custom" @selected(old('motion_preset', 'custom') === 'custom')>{{ $isAr ? 'تخصيص يدوي' : 'Custom setup' }}</option>
+                                    <option value="custom" @selected(old('motion_preset') === 'custom')>{{ $isAr ? 'تخصيص يدوي' : 'Custom setup' }}</option>
                                     <option value="subtle_story" @selected(old('motion_preset') === 'subtle_story')>{{ $isAr ? 'قصة هادئة — Zoom + Fade' : 'Subtle story — Zoom + Fade' }}</option>
                                     <option value="cinematic_depth" @selected(old('motion_preset') === 'cinematic_depth')>{{ $isAr ? 'عمق سينمائي — Parallax + انتقال متنوع' : 'Cinematic depth — Parallax + varied cuts' }}</option>
                                     <option value="news_wipe" @selected(old('motion_preset') === 'news_wipe')>{{ $isAr ? 'أخبار — Pan + Wipe' : 'News — Pan + Wipe' }}</option>
                                     <option value="hook_focus" @selected(old('motion_preset') === 'hook_focus')>{{ $isAr ? 'تركيز على الهوك — كلمة بكلمة' : 'Hook focus — word by word' }}</option>
-                                    <option value="minimal" @selected(old('motion_preset') === 'minimal')>{{ $isAr ? 'هادئ — بلا حركة خلفية' : 'Minimal — static background' }}</option>
+                                    <option value="minimal" @selected(old('motion_preset', 'minimal') === 'minimal')>{{ $isAr ? 'هادئ — حركة الخلفية الأصلية فقط' : 'Minimal — source background motion only' }}</option>
                                 </select>
-                                <p class="mt-1 text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'اختر وصفة جاهزة ثم عدّل أي خيار أدناه. الحركات مطبّقة في ملف التصدير.' : 'Choose a ready preset, then adjust any setting below. Motion is applied to the exported video.' }}</p>
+                                <p class="mt-1 text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'الافتراضي يحافظ على حركة الخلفية الأصلية فقط؛ النصوص تتحرك بشكل مستقل.' : 'By default, only the source background moves; text animation stays independent.' }}</p>
                             </div>
 
                             <div class="flex items-center justify-between">
@@ -709,7 +734,7 @@
                                     <button type="button" class="color-dot bg-amber-100" aria-label="كهرماني فاتح" aria-pressed="false" onclick="pickAccentColor('#fef3c7', this)"></button>
                                     <button type="button" class="color-dot bg-sky-400" aria-label="أزرق سماوي" aria-pressed="false" onclick="pickAccentColor('#38bdf8', this)"></button>
                                     <button type="button" class="color-dot bg-emerald-400" aria-label="أخضر" aria-pressed="false" onclick="pickAccentColor('#34d399', this)"></button>
-                                    <button type="button" class="color-dot bg-rose-400 active" aria-label="وردي" aria-pressed="true" onclick="pickAccentColor('#fb7185', this)"></button>
+                                    <button type="button" class="color-dot bg-amber-300 active" aria-label="ذهبي دافئ" aria-pressed="true" onclick="pickAccentColor('#D6B87A', this)"></button>
                                     <button type="button" class="color-dot bg-amber-400" aria-label="كهرماني" aria-pressed="false" onclick="pickAccentColor('#fbbf24', this)"></button>
                                 </div>
                             </div>
@@ -723,6 +748,27 @@
                                 <input type="range" id="fontScaleSlider" name="font_scale" min="80" max="130" value="100" aria-label="حجم الخط من 80 إلى 130 بالمئة" class="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer" oninput="changeFontSize(this.value)">
                             </div>
 
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label for="fontFamilySelect" class="block text-xs font-bold text-slate-300 mb-1.5">{{ $isAr ? 'خط النص' : 'Text font' }}</label>
+                                    <select id="fontFamilySelect" name="font_family" onchange="requestRealPreview()" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm">
+                                        @foreach (config('studio.engine.arabic_fonts', []) as $fontKey => $fontFile)
+                                            <option value="{{ $fontKey }}" @selected(old('font_family', 'Tajawal') === $fontKey)>{{ $fontKey }}</option>
+                                        @endforeach
+                                    </select>
+                                    <p class="mt-1.5 text-xs text-slate-400">{{ $isAr ? 'يتم تحديث معاينة الخط من محرك التصدير عند تغيير هذا الخيار.' : 'Changing this option refreshes the font preview from the render engine.' }}</p>
+                                </div>
+                                <div>
+                                    <label for="textEffectSelect" class="block text-xs font-bold text-slate-300 mb-1.5">{{ $isAr ? 'تأثير النص' : 'Text effect' }}</label>
+                                    <select id="textEffectSelect" name="text_effect" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
+                                        <option value="none" @selected(old('text_effect') === 'none')>{{ $isAr ? 'بدون' : 'None' }}</option>
+                                        <option value="fade_in" @selected(old('text_effect') === 'fade_in')>{{ $isAr ? 'ظهور تدريجي' : 'Fade in' }}</option>
+                                        <option value="slide_up" @selected(old('text_effect', 'slide_up') === 'slide_up')>{{ $isAr ? 'انزلاق للأعلى' : 'Slide up' }}</option>
+                                        <option value="pop_up" @selected(old('text_effect') === 'pop_up')>{{ $isAr ? 'تكبير متحرك' : 'Pop up' }}</option>
+                                    </select>
+                                </div>
+                            </div>
+
                             <div class="space-y-1.5">
                                 <div class="flex justify-between text-xs">
                                     <label for="backgroundDimming" class="text-slate-300 font-bold">تعتيم الخلفية</label>
@@ -734,10 +780,10 @@
                             <div>
                                 <label for="cameraMotion" class="block text-xs font-bold text-slate-300 mb-1.5">{{ $isAr ? 'حركة الخلفية' : 'Background motion' }}</label>
                                 <select id="cameraMotion" name="camera_motion" onchange="markMotionPresetCustom()" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs">
-                                    <option value="zoom_in" @selected(old('camera_motion', 'zoom_in') === 'zoom_in')>{{ $isAr ? 'تقريب هادئ' : 'Gentle zoom in' }}</option>
+                                    <option value="zoom_in" @selected(old('camera_motion') === 'zoom_in')>{{ $isAr ? 'تقريب هادئ' : 'Gentle zoom in' }}</option>
                                     <option value="pan" @selected(old('camera_motion') === 'pan')>{{ $isAr ? 'تحريك أفقي' : 'Horizontal pan' }}</option>
                                     <option value="parallax" @selected(old('camera_motion') === 'parallax')>{{ $isAr ? 'عمق Parallax خفيف' : 'Subtle parallax-style depth' }}</option>
-                                    <option value="static" @selected(old('camera_motion') === 'static')>{{ $isAr ? 'ثابت' : 'Static' }}</option>
+                                    <option value="static" @selected(old('camera_motion', 'static') === 'static')>{{ $isAr ? 'ثابت' : 'Static' }}</option>
                                 </select>
                             </div>
 
@@ -822,8 +868,8 @@
 
                             <div class="studio-card p-4 space-y-3">
                                 <label class="flex items-start gap-3 text-xs text-slate-200">
-                                    <input type="checkbox" name="voiceover_enabled" value="1" @checked(old('voiceover_enabled')) class="mt-0.5 h-4 w-4 accent-amber-500">
-                                    <span><strong class="block text-white">إضافة تعليق صوتي طبيعي (ElevenLabs)</strong><span class="text-[10px] leading-relaxed text-slate-400">يقرأ العنوان والنقاط بالتسلسل، وتطول مدة الفيديو تلقائياً إذا احتاج الكلام وقتاً إضافياً.</span></span>
+                                    <input type="checkbox" name="voiceover_enabled" value="1" @checked(old('voiceover_enabled', false)) class="mt-0.5 h-4 w-4 accent-amber-500">
+                                    <span><strong class="block text-white">إضافة تعليق صوتي طبيعي (ElevenLabs)</strong><span class="text-[10px] leading-relaxed text-slate-400">يقرأ العنوان والمشاهد بالتسلسل؛ اختر مدة كافية لنطق النص كاملاً.</span></span>
                                 </label>
                                 @if ($errors->has('voiceover_enabled'))
                                     <p class="rounded-lg border border-rose-500/30 bg-rose-950/30 p-2 text-[10px] leading-relaxed text-rose-200" role="alert">{{ $errors->first('voiceover_enabled') }}</p>
@@ -833,12 +879,16 @@
                                 <div>
                                     <label for="voiceoverTone" class="mb-1.5 block text-[11px] font-bold text-slate-300">نبرة التعليق</label>
                                     <select id="voiceoverTone" name="voiceover_tone" class="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-xs text-white">
-                                        <option value="neutral" @selected(old('voiceover_tone', 'neutral') === 'neutral')>طبيعية وواضحة</option>
+                                        <option value="neutral" @selected(old('voiceover_tone') === 'neutral')>طبيعية وواضحة</option>
                                         <option value="calm" @selected(old('voiceover_tone') === 'calm')>هادئة</option>
-                                        <option value="warm" @selected(old('voiceover_tone') === 'warm')>دافئة وواثقة</option>
+                                        <option value="warm" @selected(old('voiceover_tone', 'warm') === 'warm')>دافئة وواثقة</option>
                                         <option value="energetic" @selected(old('voiceover_tone') === 'energetic')>حيوية</option>
                                     </select>
                                 </div>
+                                <label class="flex items-start gap-3 text-xs text-slate-200">
+                                    <input type="checkbox" name="sound_effects_enabled" value="1" @checked(old('sound_effects_enabled', true)) class="mt-0.5 h-4 w-4 accent-amber-500">
+                                    <span><strong class="block text-white">مؤثرات انتقال هادئة</strong><span class="text-[10px] leading-relaxed text-slate-400">قصيرة ومنخفضة الصوت، وتُنشأ محلياً عند دخول المشاهد.</span></span>
+                                </label>
                             </div>
 
                             <div class="rounded-xl border border-slate-800 bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-400">
@@ -1109,7 +1159,7 @@
                                 </label>
                                 <label class="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2.5 cursor-pointer">
                                     <input type="hidden" name="auto_music" value="0">
-                                    <input type="checkbox" name="auto_music" value="1" checked class="accent-amber-500">
+                                    <input type="checkbox" name="auto_music" value="1" class="accent-amber-500">
                                     <span>{{ $isAr ? 'موسيقى خلفية أصلية تلقائية' : 'Original ambient bed' }}</span>
                                 </label>
                             </div>
@@ -1322,6 +1372,8 @@
 
     <script>
         // Navigation between steps
+        const wizardStepNames = @json($wizardStepNames);
+
         function goToStep(step) {
             const previousStep = Number(document.body.dataset.currentStep || 1);
             const brief = document.getElementById('inputUserPrompt');
@@ -1350,6 +1402,20 @@
             if (activeT) activeT.classList.add('active');
             document.body.dataset.currentStep = String(step);
             document.body.dataset.stepDirection = step >= previousStep ? 'forward' : 'backward';
+
+            const stepName = wizardStepNames[step - 1] || '';
+            const progressCount = document.getElementById('wizardStepProgressCount');
+            const progressName = document.getElementById('wizardStepProgressName');
+            const progressBar = document.getElementById('wizardStepProgressBar');
+            const progressFill = document.getElementById('wizardStepProgressFill');
+            if (progressCount) progressCount.textContent = @json($isAr ? 'الخطوة' : 'Step') + ` ${step} ` + @json($isAr ? 'من 7' : 'of 7');
+            if (progressName) progressName.textContent = stepName;
+            if (progressBar) {
+                progressBar.setAttribute('aria-valuenow', String(step));
+                progressBar.setAttribute('aria-valuetext', `${@json($isAr ? 'الخطوة' : 'Step')} ${step} ${@json($isAr ? 'من 7' : 'of 7')}: ${stepName}`);
+            }
+            if (progressFill) progressFill.style.width = `${(step / 7) * 100}%`;
+
             if (typeof window.persistWizardDraft === 'function') window.persistWizardDraft();
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -1639,7 +1705,7 @@
 
             if (number) {
                 const marker = document.createElement('span');
-                marker.className = 'text-amber-400';
+                marker.className = 'me-2 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15 px-1 text-[10px] font-bold text-amber-300';
                 marker.textContent = number;
                 element.append(marker, document.createTextNode(' '));
             }
@@ -1648,7 +1714,7 @@
                 const firstWord = text.match(/^\s*\S+/u)?.[0] ?? '';
                 if (firstWord) {
                     const emphasis = document.createElement('strong');
-                    emphasis.style.color = document.getElementById('hiddenAccentColor')?.value || '#fb7185';
+                    emphasis.style.color = document.getElementById('hiddenAccentColor')?.value || '#D6B87A';
                     emphasis.textContent = firstWord.trim();
                     element.append(emphasis, document.createTextNode(text.slice(firstWord.length)));
                     return;
@@ -1664,23 +1730,23 @@
             const l2 = document.getElementById('inputLine2').value;
             const l3 = document.getElementById('inputLine3').value;
             
-            setPreviewLine('step4CardLine1', l1, '1.', true);
-            setPreviewLine('step4CardLine2', l2, null, true);
-            setPreviewLine('step4CardLine3', l3, null, true);
+            setPreviewLine('step4CardLine1', l1, '1', true);
+            setPreviewLine('step4CardLine2', l2, '2', true);
+            setPreviewLine('step4CardLine3', l3, '3', true);
 
-            setPreviewLine('step5CardLine1', l1, '1.', true);
-            setPreviewLine('step5CardLine2', l2, null, true);
-            setPreviewLine('step5CardLine3', l3, null, true);
+            setPreviewLine('step5CardLine1', l1, '1', true);
+            setPreviewLine('step5CardLine2', l2, '2', true);
+            setPreviewLine('step5CardLine3', l3, '3', true);
 
-            setPreviewLine('s7Line1', l1, '1.', true);
-            setPreviewLine('s7Line2', l2, null, true);
-            setPreviewLine('s7Line3', l3, null, true);
+            setPreviewLine('s7Line1', l1, '1', true);
+            setPreviewLine('s7Line2', l2, '2', true);
+            setPreviewLine('s7Line3', l3, '3', true);
             updateTimelineLabels();
         }
         updateScriptPreview();
 
         function getPreviewDuration() {
-            return Number(document.querySelector('input[name="duration"]:checked')?.value || 10);
+            return Number(document.querySelector('input[name="duration"]:checked')?.value || 60);
         }
 
         function updateTimelineLabels() {
@@ -1810,7 +1876,7 @@
                     line1: document.getElementById('inputLine1')?.value || '',
                     line2: document.getElementById('inputLine2')?.value || '',
                     line3: document.getElementById('inputLine3')?.value || '',
-                    duration: document.querySelector('input[name="duration"]:checked')?.value || '10',
+                    duration: document.querySelector('input[name="duration"]:checked')?.value || '60',
                     aspect_ratio: document.getElementById('wizardAspectRatio')?.value || '9:16',
                     language: document.getElementById('wizardLanguage')?.value || @json($lang),
                     manual_content: false,
@@ -2145,7 +2211,7 @@
                     && !['file', 'submit', 'button', 'reset', 'password'].includes((field.type || '').toLowerCase());
             });
             const savedMessage = @json($isAr ? 'تم حفظ المسودة محلياً.' : 'Draft saved locally.');
-            const restoredMessage = @json($isAr ? 'استُعيدت مسودتك المحفوظة. الملفات والمفاتيح المؤقتة تحتاج إلى إدخال من جديد.' : 'Your saved draft was restored. Re-select files and re-enter temporary API keys if needed.');
+            const restoredMessage = @json($isAr ? 'استُعيدت المسودة. أعد اختيار الملفات إذا لزم الأمر.' : 'Draft restored. Re-select uploaded files if needed.');
 
             function persistDraft() {
                 const draft = {
@@ -2342,8 +2408,6 @@
                 ['نصيحة سريعة', 'Quick tip'],
                 ['قائمة', 'List'],
                 ['قصة', 'Story'],
-                ['مفاتيح Gemini لهذه العملية فقط (اختياري)', 'Gemini keys for this run (optional)'],
-                ['تُستخدم مفاتيح Gemini النشطة المحفوظة تلقائياً؛ يمكنك إضافة مفاتيح مؤقتة لهذه العملية. لإدارتها اضغط «إدارة المفاتيح» بالأعلى. قد تُحتسب الطلبات لدى المزود.', 'Active saved Gemini keys are used automatically. You can add temporary keys for this run; manage them from Manage Keys above. Provider requests may incur usage.'],
                 ['قالب اقتراح', 'Suggestion template'],
                 ['اقتراح محلي قابل للتعديل', 'Editable local suggestion'],
                 ['اقترح فكرة من القوالب المحلية', 'Suggest from local templates'],
@@ -2409,10 +2473,12 @@
             payload.append('line2', value('[name="line2"]'));
             payload.append('line3', value('[name="line3"]'));
             payload.append('language', value('#wizardLanguage') || @json($lang));
-            payload.append('template', value('#hiddenTemplate') || 'classic');
+            payload.append('template', value('#hiddenTemplate') || 'cinematic');
             payload.append('handle', value('#inputPageHandle'));
-            payload.append('accent_color', value('#hiddenAccentColor') || '#fb7185');
+            payload.append('accent_color', value('#hiddenAccentColor') || '#D6B87A');
             payload.append('font_scale', value('#fontScaleSlider') || '100');
+            payload.append('font_family', value('#fontFamilySelect') || 'Tajawal');
+            payload.append('text_effect', value('#textEffectSelect') || 'slide_up');
             payload.append('quality', value('#wizardQuality') || '1080');
             payload.append('aspect_ratio', value('#wizardAspectRatio') || '9:16');
 

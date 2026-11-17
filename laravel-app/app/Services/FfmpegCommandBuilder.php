@@ -22,7 +22,7 @@ class FfmpegCommandBuilder
     ): array {
         $size = $this->dimensions((string) ($options['aspect_ratio'] ?? $reel->aspect_ratio ?? '9:16'), (int) ($options['quality'] ?? 1080));
         [$width, $height] = $size;
-        $duration = max(3.0, (float) ($reel->duration ?: 10));
+        $duration = max(3.0, (float) ($options['_render_duration'] ?? $reel->duration ?: 10));
         $fps = 30;
         $inputs = ['-y', '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats'];
 
@@ -110,10 +110,7 @@ class FfmpegCommandBuilder
         }
 
         $textFiles = is_array($options['_text_files'] ?? null) ? $options['_text_files'] : [];
-        $font = trim((string) config('studio.engine.arabic_font', ''));
-        if ($font === '') {
-            $font = base_path('../python_engine/fonts/NotoKufiArabic.ttf');
-        }
+        $font = $this->resolveFontPath();
 
         // Generate ASS subtitle file using AssOverlayBuilder for proper Arabic text rendering
         // Derive ASS path from the subtitlePath parameter (which is an SRT file in the work directory)
@@ -153,7 +150,7 @@ class FfmpegCommandBuilder
             $audioLabels[] = $label;
         }
         if ($musicIndex !== null) {
-            $volume = $voiceIndex !== null ? ($musicPath === null ? '0.08' : '0.12') : ($sourceAudioIndices !== [] ? '0.16' : '0.24');
+            $volume = $voiceIndex !== null ? '0.12' : ($sourceAudioIndices !== [] ? '0.16' : '0.24');
             $label = 'bgm';
             $fadeOutStart = max(0, $duration - 1);
             $filterParts[] = '['.$musicIndex.':a]volume='.$volume.',afade=t=in:st=0:d=0.6,afade=t=out:st='.$this->number($fadeOutStart).':d=1['.$label.']';
@@ -162,6 +159,33 @@ class FfmpegCommandBuilder
         if ($voiceIndex !== null) {
             $filterParts[] = '['.$voiceIndex.':a]volume=1.0[voice]';
             $audioLabels[] = 'voice';
+        }
+        if ($musicIndex !== null && $voiceIndex !== null) {
+            $filterParts[] = '[bgm][voice]sidechaincompress=threshold=0.12:ratio=4:attack=5:release=200[bgm_ducked]';
+            // replace bgm in audioLabels with bgm_ducked
+            $audioLabels = array_map(static fn (string $lbl): string => $lbl === 'bgm' ? 'bgm_ducked' : $lbl, $audioLabels);
+        }
+        if (! empty($options['sound_effects'])) {
+            $textFiles = is_array($options['_text_files'] ?? null) ? $options['_text_files'] : [];
+            $pointCount = count($this->textSources($options['custom_points'] ?? $textFiles['points'] ?? []));
+            $headlineEnd = $pointCount > 0
+                ? min($duration, max(2.5, $duration * 0.34))
+                : max(2.5, $duration - 2.0);
+            $pointSpan = max(0.1, max($headlineEnd, $duration - 2.0) - $headlineEnd);
+            $effectTimes = [0.12];
+            for ($index = 0; $index < $pointCount; $index++) {
+                $effectTimes[] = $headlineEnd + ($pointSpan / max(1, $pointCount) * $index);
+            }
+
+            foreach ($effectTimes as $index => $start) {
+                $label = 'sfx'.$index;
+                $delay = (int) round($start * 1000);
+                $filterParts[] = 'anoisesrc=color=pink:sample_rate=44100:amplitude=0.08:d=0.38'
+                    .',highpass=f=450,lowpass=f=5000,aformat=sample_rates=44100:channel_layouts=stereo'
+                    .',afade=t=in:st=0:d=0.04,afade=t=out:st=0.08:d=0.3,volume=0.15'
+                    .',adelay='.$delay.'|'.$delay.'['.$label.']';
+                $audioLabels[] = $label;
+            }
         }
         if (count($audioLabels) === 1) {
             $filterParts[] = '['.$audioLabels[0].']alimiter=limit=0.95[aout]';
@@ -196,10 +220,7 @@ class FfmpegCommandBuilder
     {
         [$width, $height] = $this->dimensions((string) ($options['aspect_ratio'] ?? '9:16'), (int) ($options['quality'] ?? 720));
         $textFiles = is_array($options['_text_files'] ?? null) ? $options['_text_files'] : [];
-        $font = trim((string) config('studio.engine.arabic_font', ''));
-        if ($font === '') {
-            $font = base_path('../python_engine/fonts/NotoKufiArabic.ttf');
-        }
+        $font = $this->resolveFontPath();
 
         // Generate ASS subtitle file for preview using AssOverlayBuilder
         $assBuilder = new AssOverlayBuilder;
@@ -337,6 +358,30 @@ class FfmpegCommandBuilder
     private function fontsDirectoryOption(string $font): string
     {
         return is_file($font) ? ':fontsdir='.$this->filterValue(dirname($font)) : '';
+    }
+
+    /**
+     * Resolve the configured Arabic font family name to an absolute .ttf path.
+     * Falls back to the bundled NotoKufiArabic.ttf if the name is not mapped.
+     */
+    private function resolveFontPath(): string
+    {
+        $family = trim((string) config('studio.engine.arabic_font', 'Noto Kufi Arabic'));
+        $fonts = config('studio.engine.arabic_fonts', []);
+        $fontsDir = trim((string) config('studio.engine.fontsdir', ''));
+
+        $file = $fonts[$family] ?? ($fonts['Noto Kufi Arabic'] ?? 'NotoKufiArabic.ttf');
+
+        if ($fontsDir !== '' && is_file($fontsDir.'/'.$file)) {
+            return $fontsDir.'/'.$file;
+        }
+
+        $fallback = base_path('../python_engine/fonts/'.$file);
+        if (is_file($fallback)) {
+            return $fallback;
+        }
+
+        return $file;
     }
 
     private function filterValue(string $value): string

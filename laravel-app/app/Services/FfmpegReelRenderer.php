@@ -6,6 +6,7 @@ use App\Exceptions\RenderFailedException;
 use App\Models\Reel;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
@@ -38,10 +39,13 @@ class FfmpegReelRenderer implements RenderEngine
             }
             $this->publishFile($temporaryOutput, $outputPath);
         } catch (ProcessTimedOutException $exception) {
+            $this->logRenderError('preview_timeout', $exception, ['language' => $options['language'] ?? 'ar']);
             throw $this->failure('timeout', true, (string) ($options['language'] ?? 'ar'), $exception->getMessage());
         } catch (RenderFailedException $exception) {
+            $this->logRenderError('preview_failed', $exception, ['language' => $options['language'] ?? 'ar']);
             throw $exception;
         } catch (Throwable $exception) {
+            $this->logRenderError('preview_exception', $exception, ['language' => $options['language'] ?? 'ar']);
             throw $this->failure('preview_failed', false, (string) ($options['language'] ?? 'ar'), $exception->getMessage());
         } finally {
             File::deleteDirectory($workDirectory);
@@ -108,13 +112,29 @@ class FfmpegReelRenderer implements RenderEngine
                 'handle' => trim((string) $reel->handle),
             ]);
             $subtitleTemporary = $workDirectory.'/captions.srt';
-            $this->writeSubtitles($subtitleTemporary, $points, (float) ($reel->duration ?: 10));
+            $duration = (float) ($reel->duration ?: 10);
+            $headlineEnd = min($duration, max(2.5, $duration * 0.34));
+            $pointsEnd = max($headlineEnd, $duration - 2.0);
+            $this->writeSubtitles($subtitleTemporary, $points, $headlineEnd, $pointsEnd);
 
             $voiceTemporary = null;
+            $narrationSeconds = null;
             if (! empty($options['voiceover'])) {
                 $voiceTemporary = $workDirectory.'/voiceover.mp3';
                 $this->voiceover->generate($content['script'], $language, (string) ($options['voiceover_tone'] ?? 'neutral'), $voiceTemporary);
+                $narrationSeconds = $this->audioDuration($voiceTemporary);
             }
+            $scenePlan = (new CaptionTimeline)->allocateScenes(
+                [$content['headline']],
+                $points,
+                [$content['cta']],
+                $duration,
+                $language,
+            );
+            if ($narrationSeconds !== null && $narrationSeconds > 0.0) {
+                $scenePlan = (new CaptionTimeline)->fitToNarration($scenePlan, $duration, $narrationSeconds);
+            }
+            $options['_scene_plan'] = $scenePlan;
 
             $outputTemporary = $workDirectory.'/render.mp4';
             $thumbnailTemporary = $workDirectory.'/thumbnail.jpg';
@@ -122,7 +142,9 @@ class FfmpegReelRenderer implements RenderEngine
             $options['headline'] = $content['headline'];
             $options['custom_points'] = $points;
             $options['aspect_ratio'] = $reel->aspect_ratio;
-            $options['_source_audio_indices'] = $this->sourceAudioIndices($inputPaths, $language);
+            $options['_source_audio_indices'] = ! empty($options['background_sequence'])
+                ? []
+                : $this->sourceAudioIndices($inputPaths, $language);
 
             $command = $this->commands->build(
                 $reel,
@@ -166,12 +188,15 @@ class FfmpegReelRenderer implements RenderEngine
             ];
         } catch (ProcessTimedOutException $exception) {
             $this->deletePublished($publishedPaths);
+            $this->logRenderError('render_timeout', $exception, ['reel_id' => $reel->id, 'language' => $language]);
             throw $this->failure('timeout', true, $language, $exception->getMessage());
         } catch (RenderFailedException $exception) {
             $this->deletePublished($publishedPaths);
+            $this->logRenderError('render_failed', $exception, ['reel_id' => $reel->id, 'language' => $language]);
             throw $exception;
         } catch (Throwable $exception) {
             $this->deletePublished($publishedPaths);
+            $this->logRenderError('render_exception', $exception, ['reel_id' => $reel->id, 'language' => $language]);
             throw $this->failure('render_failed', true, $language, $exception->getMessage());
         } finally {
             if ($workDirectory !== null) {
@@ -179,6 +204,34 @@ class FfmpegReelRenderer implements RenderEngine
             }
             $lock->release();
         }
+    }
+
+    /**
+     * Measure the runtime of an audio file with ffprobe.
+     */
+    private function audioDuration(?string $path): ?float
+    {
+        if ($path === null || ! is_file($path)) {
+            return null;
+        }
+        $ffprobe = (string) config('studio.engine.ffprobe_bin', 'ffprobe');
+        $process = new Process([
+            $ffprobe,
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            $path,
+        ], base_path('../'));
+        $process->setTimeout(15);
+
+        try {
+            $process->run();
+        } catch (Throwable) {
+            return null;
+        }
+        $value = (float) trim($process->getOutput());
+
+        return $value > 0.0 ? $value : null;
     }
 
     /** @param list<string> $command */
@@ -314,16 +367,13 @@ class FfmpegReelRenderer implements RenderEngine
     }
 
     /** @param list<string> $points */
-    private function writeSubtitles(string $path, array $points, float $duration): void
+    private function writeSubtitles(string $path, array $points, float $start, float $end): void
     {
-        $count = max(1, count($points));
         $content = [];
-        foreach ($points as $index => $point) {
-            $start = $duration * $index / $count;
-            $end = $duration * ($index + 1) / $count;
+        foreach ((new CaptionTimeline)->allocate($points, $start, $end) as $index => $segment) {
             $content[] = (string) ($index + 1);
-            $content[] = $this->timestamp($start).' --> '.$this->timestamp($end);
-            $content[] = str_replace(["\r", "\n"], ' ', $point);
+            $content[] = $this->timestamp($segment['start']).' --> '.$this->timestamp($segment['end']);
+            $content[] = str_replace(["\r", "\n"], ' ', $segment['text']);
             $content[] = '';
         }
         if (file_put_contents($path, implode("\n", $content)) === false) {
@@ -378,5 +428,25 @@ class FfmpegReelRenderer implements RenderEngine
             userMessage: trans('studio.errors.'.$stage, [], $language),
             logMessage: $logMessage,
         );
+    }
+
+    /**
+     * Record a render failure on the dedicated render-errors channel so that
+     * FFmpeg, timeout and provider failures can be reviewed separately from
+     * the noisy application log.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function logRenderError(string $stage, Throwable $exception, array $context = []): void
+    {
+        try {
+            Log::channel('render_errors')->error('render_error', array_merge($context, [
+                'stage' => $stage,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]));
+        } catch (Throwable) {
+            // Monitoring must never break a render.
+        }
     }
 }

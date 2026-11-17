@@ -6,11 +6,13 @@ use App\Jobs\GenerateReelVideo;
 use App\Models\ProviderSetting;
 use App\Models\Reel;
 use App\Models\ReelCollection;
+use App\Services\BackgroundSequenceSelector;
 use App\Services\FactCheckService;
 use App\Services\GeminiContentService;
 use App\Services\ProviderKeyRing;
 use App\Services\ReelQualityAnalyzer;
 use App\Services\RenderEngine;
+use App\Services\VideoScriptPacing;
 use App\Support\StudioPaths;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -21,7 +23,6 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Process\Process;
 
 class ReelController extends Controller
 {
@@ -87,27 +88,8 @@ class ReelController extends Controller
             'ar' => $elevenLabsKeys !== [] && filled($this->elevenLabsVoiceId('ar')),
             'en' => $elevenLabsKeys !== [] && filled($this->elevenLabsVoiceId('en')),
         ];
-        $python = (string) config('studio.engine.python_bin');
-        $ffmpeg = false;
-        if (is_file($python) && is_executable($python)) {
-            try {
-                $ffmpeg = (new Process([$python, '-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())']))->run() === 0;
-            } catch (\Throwable) {
-                $ffmpeg = false;
-            }
-        }
-        $storagePath = StudioPaths::videos();
-        $freeBytes = @disk_free_space($storagePath);
-        $readiness = [
-            'gemini' => $this->activeProviderKeys('gemini') !== [],
-            'elevenlabs' => $elevenLabsKeys !== [],
-            'python' => is_file($python) && is_executable($python),
-            'ffmpeg' => $ffmpeg,
-            'storage' => is_writable($storagePath) && ($freeBytes === false || $freeBytes >= 512 * 1024 * 1024),
-            'storage_label' => $freeBytes === false ? 'Unknown' : number_format(((int) $freeBytes) / 1024 / 1024 / 1024, 1).' GB free',
-        ];
 
-        return view('reels.wizard', compact('lang', 'backgrounds', 'voiceoverAvailable', 'readiness'));
+        return view('reels.wizard', compact('lang', 'backgrounds', 'voiceoverAvailable'));
     }
 
     public function show(Reel $reel): RedirectResponse
@@ -132,6 +114,8 @@ class ReelController extends Controller
             'handle' => ['nullable', 'string', 'max:100'],
             'accent_color' => ['nullable', 'regex:/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/'],
             'font_scale' => ['nullable', 'integer', 'min:80', 'max:130'],
+            'font_family' => ['nullable', Rule::in(array_keys(config('studio.engine.arabic_fonts', [])))],
+            'text_effect' => ['nullable', Rule::in(['none', 'fade_in', 'slide_up', 'pop_up'])],
             'quality' => ['nullable', Rule::in(['720', '1080'])],
             'captions' => ['nullable', 'boolean'],
             'auto_music' => ['nullable', 'boolean'],
@@ -152,6 +136,7 @@ class ReelController extends Controller
         $handle = trim((string) ($validated['handle'] ?? ''));
         $accentColor = (string) ($validated['accent_color'] ?? '#fb7185');
         $fontScale = (int) ($validated['font_scale'] ?? 100);
+        $textEffect = (string) ($validated['text_effect'] ?? 'slide_up');
         $quality = (int) ($validated['quality'] ?? 1080);
         $aspectRatio = (string) ($validated['aspect_ratio'] ?? '9:16');
 
@@ -176,6 +161,8 @@ class ReelController extends Controller
                 'language' => $language,
                 'accent_color' => $accentColor,
                 'font_scale' => $fontScale,
+                'font_family' => (string) ($validated['font_family'] ?? 'Tajawal'),
+                'text_effect' => $textEffect,
                 'template' => $template,
                 'quality' => (string) $quality,
                 'aspect_ratio' => $aspectRatio,
@@ -208,7 +195,7 @@ class ReelController extends Controller
             'topic' => ['nullable', 'string', 'max:255'],
             'user_prompt' => ['nullable', 'string', 'max:1000'],
             'manual_content' => ['nullable', 'boolean'],
-            'duration' => ['nullable', 'numeric', 'min:3', 'max:60'],
+            'duration' => ['nullable', 'integer', 'min:10', 'max:60'],
             'aspect_ratio' => ['nullable', Rule::in(['9:16', '1:1', '16:9'])],
             'language' => ['nullable', Rule::in(['ar', 'en'])],
         ]);
@@ -280,8 +267,10 @@ class ReelController extends Controller
             'hook_word_by_word' => ['nullable', 'boolean'],
             'highlight_important' => ['nullable', 'boolean'],
             'font_scale' => ['nullable', 'integer', 'min:80', 'max:130'],
+            'font_family' => ['nullable', Rule::in(array_keys(config('studio.engine.arabic_fonts', [])))],
+            'text_effect' => ['nullable', Rule::in(['none', 'fade_in', 'slide_up', 'pop_up'])],
             'background_dimming' => ['nullable', 'integer', 'min:0', 'max:80'],
-            'duration' => ['nullable', 'numeric', 'min:3', 'max:60'],
+            'duration' => ['nullable', 'integer', 'min:10', 'max:60'],
             'gemini_keys' => ['nullable', 'string', 'max:5000'],
             'videos' => ['nullable', 'array', 'max:5'],
             'videos.*' => ['file', 'mimes:mp4,mov,avi,webm', 'max:'.((int) config('studio.limits.max_video_mb', 100) * 1024)],
@@ -289,6 +278,7 @@ class ReelController extends Controller
             'music' => ['nullable', 'file', 'mimes:mp3,wav,m4a', 'max:'.((int) config('studio.limits.max_music_mb', 20) * 1024)],
             'voiceover_enabled' => ['nullable', 'boolean'],
             'voiceover_tone' => ['nullable', Rule::in(['neutral', 'calm', 'warm', 'energetic'])],
+            'sound_effects_enabled' => ['nullable', 'boolean'],
             'headline' => ['nullable', 'string', 'max:255'],
             'hook_headline' => ['nullable', 'string', 'max:255'],
             'caption' => ['nullable', 'string', 'max:3000'],
@@ -375,18 +365,19 @@ class ReelController extends Controller
         $niche = $validated['niche'] ?? 'productivity';
         $targetCountry = $validated['target_country'] ?? 'Global';
         $goal = $validated['goal'] ?? 'followers';
-        $template = $validated['template'] ?? 'classic';
+        $template = $validated['template'] ?? 'cinematic';
         $formatType = $validated['format_type'] ?? 'full_idea';
         $handle = trim((string) ($validated['handle'] ?? ''));
         $style = $validated['style'] ?? 'engaging';
         $aspectRatio = $validated['aspect_ratio'] ?? '9:16';
-        $cameraMotion = $validated['camera_motion'] ?? 'zoom_in';
+        $cameraMotion = $validated['camera_motion'] ?? 'static';
         $fontScale = (int) ($validated['font_scale'] ?? 100);
+        $textEffect = (string) ($validated['text_effect'] ?? 'slide_up');
         $backgroundDimming = (int) ($validated['background_dimming'] ?? 35);
         $antiBorder = $request->boolean('anti_border');
-        $accentColor = $validated['accent_color'] ?? '#fb7185';
+        $accentColor = $validated['accent_color'] ?? '#D6B87A';
         $title = ($validated['title'] ?? '') ?: (($language === 'en' ? 'Reel: ' : 'ريلز: ').$topic);
-        $duration = (float) ($validated['duration'] ?? 10.0);
+        $duration = (float) ($validated['duration'] ?? 60.0);
         $configuredGeminiKeys = json_decode((string) config('services.gemini.keys_json', '[]'), true);
         $configuredGeminiKeys = is_array($configuredGeminiKeys) ? $configuredGeminiKeys : [];
         $submittedGeminiKeys = array_map('trim', preg_split('/\r?\n/', (string) ($validated['gemini_keys'] ?? '')));
@@ -406,6 +397,8 @@ class ReelController extends Controller
         $localDisk = Storage::disk('local');
         $uploadedVideoPaths = [];
         $storedInputPaths = [];
+        $backgroundId = $request->input('bg_preset') ?: ($backgrounds[0]['id'] ?? null);
+        $backgroundSequence = false;
 
         if ($request->hasFile('videos') && count($request->file('videos')) > 0) {
             foreach ($request->file('videos') as $file) {
@@ -416,11 +409,10 @@ class ReelController extends Controller
                 }
             }
         } else {
-            $backgroundId = $request->input('bg_preset') ?: ($backgrounds[0]['id'] ?? null);
-            $selectedBackground = collect($backgrounds)->firstWhere('id', $backgroundId);
-
-            if ($selectedBackground && is_file($selectedBackground['path'])) {
-                $uploadedVideoPaths[] = $selectedBackground['path'];
+            $backgroundPaths = app(BackgroundSequenceSelector::class)->select($backgrounds, $backgroundId, $duration);
+            if ($backgroundPaths !== []) {
+                $uploadedVideoPaths = $backgroundPaths;
+                $backgroundSequence = count($backgroundPaths) > 1;
             } else {
                 $sampleSource = base_path('../python_engine/storage/input/sample.mp4');
                 if (is_file($sampleSource)) {
@@ -444,23 +436,27 @@ class ReelController extends Controller
 
         $options = [
             'font_scale' => $fontScale,
+            'font_family' => (string) ($validated['font_family'] ?? 'Tajawal'),
+            'text_effect' => $textEffect,
             'background_dimming' => $backgroundDimming,
             'anti_border' => $antiBorder,
             'voiceover' => $voiceoverEnabled,
-            'voiceover_tone' => $validated['voiceover_tone'] ?? 'neutral',
+            'voiceover_tone' => $validated['voiceover_tone'] ?? 'warm',
+            'sound_effects' => $request->boolean('sound_effects_enabled'),
             'accent_color' => $accentColor,
             'quality' => (int) ($validated['quality'] ?? 1080),
             'captions' => $request->has('captions') ? $request->boolean('captions') : true,
             'auto_music' => $request->has('auto_music') ? $request->boolean('auto_music') : true,
             'manual_content' => $manualContent,
-            'motion_preset' => $validated['motion_preset'] ?? 'custom',
+            'motion_preset' => $validated['motion_preset'] ?? 'minimal',
             'text_motion' => $validated['text_motion'] ?? 'vertical',
             'scene_transition' => $validated['scene_transition'] ?? 'template',
             'hook_word_by_word' => $request->boolean('hook_word_by_word'),
             'highlight_important' => $request->has('highlight_important')
                 ? $request->boolean('highlight_important')
                 : true,
-            'bg_preset' => $request->input('bg_preset') ?: ($backgrounds[0]['id'] ?? null),
+            'bg_preset' => $backgroundId,
+            'background_sequence' => $backgroundSequence,
             'custom_headline' => $customHeadline,
             'custom_points' => $customPoints,
             'caption' => trim((string) ($validated['caption'] ?? '')),
@@ -600,7 +596,12 @@ class ReelController extends Controller
             'goal' => ['nullable', 'string', Rule::in(['followers', 'saves', 'shares', 'comments'])],
             'handle' => ['nullable', 'string', 'max:100'],
             'accent_color' => ['nullable', 'regex:/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/'],
-            'duration' => ['nullable', 'numeric', 'min:3', 'max:60'],
+            'font_family' => ['nullable', Rule::in(array_keys(config('studio.engine.arabic_fonts', [])))],
+            'text_effect' => ['nullable', Rule::in(['none', 'fade_in', 'slide_up', 'pop_up'])],
+            'voiceover_enabled' => ['nullable', 'boolean'],
+            'voiceover_tone' => ['nullable', Rule::in(['neutral', 'calm', 'warm', 'energetic'])],
+            'sound_effects_enabled' => ['nullable', 'boolean'],
+            'duration' => ['nullable', 'integer', 'min:10', 'max:60'],
             'bg_preset' => ['nullable', Rule::in($backgroundIds)],
             'videos' => ['nullable', 'array', 'max:5'],
             'videos.*' => ['file', 'mimes:mp4,mov,avi,webm', 'max:'.((int) config('studio.limits.max_video_mb', 100) * 1024)],
@@ -609,6 +610,19 @@ class ReelController extends Controller
         $sessionLanguage = session('app_locale');
         $language = $validated['language'] ?? (in_array($sessionLanguage, ['ar', 'en'], true) ? $sessionLanguage : 'ar');
         $ideaText = trim($validated['idea']);
+        $duration = (float) ($validated['duration'] ?? 60.0);
+        $pacing = new VideoScriptPacing;
+        $sceneCount = $pacing->sceneCount($duration);
+        $targetWords = $pacing->targetWordCount($duration);
+        $voiceoverEnabled = $request->boolean('voiceover_enabled');
+
+        if ($voiceoverEnabled && ($this->configuredElevenLabsKeys() === [] || ! filled($this->elevenLabsVoiceId($language)))) {
+            $message = $language === 'en'
+                ? 'Add an active ElevenLabs key and an English Voice ID before generating a narrated scenario.'
+                : 'أضف مفتاح ElevenLabs نشطاً وVoice ID عربياً قبل توليد سيناريو مع تعليق صوتي.';
+
+            return back()->withErrors(['voiceover_enabled' => $message])->withInput();
+        }
 
         $configuredGeminiKeys = json_decode((string) config('services.gemini.keys_json', '[]'), true);
         $configuredGeminiKeys = is_array($configuredGeminiKeys) ? $configuredGeminiKeys : [];
@@ -627,14 +641,16 @@ class ReelController extends Controller
 
         try {
             $result = app(GeminiContentService::class)->generate($this->geminiPrompt(
-                'Return JSON with keys title,headline,points,caption,hashtags. Turn the plain idea into one complete short-video script: title is a short storage label, headline is one spoken opening hook of at most 12 words, points is exactly three short spoken scenes that build on the hook, caption is a ready-to-post social caption, and hashtags is one space-separated hashtag string. Keep every claim verifiable and write everything in the requested language.',
+                'Return JSON with keys title,headline,points,caption,hashtags. Turn the plain idea into one complete short-video script: title is a short storage label, headline is one spoken opening hook of at most 12 words, points is exactly '.$sceneCount.' spoken scenes that build on the hook, and the complete spoken script should be about '.$targetWords.' words to fit the requested duration at a natural pace. Give every scene one concrete detail and keep its on-screen text concise. Caption is a ready-to-post social caption, and hashtags is one space-separated hashtag string. Keep every claim verifiable and write everything in the requested language.',
                 [
                     'idea' => $ideaText,
                     'language' => $language,
                     'niche' => $validated['niche'] ?? 'productivity',
                     'goal' => $validated['goal'] ?? 'followers',
                     'target_country' => $validated['target_country'] ?? 'Global',
-                    'duration_seconds' => (int) round((float) ($validated['duration'] ?? 10.0)),
+                    'duration_seconds' => (int) round($duration),
+                    'scene_count' => $sceneCount,
+                    'target_spoken_words' => $targetWords,
                 ]
             ));
             $script = $result['data'];
@@ -645,7 +661,7 @@ class ReelController extends Controller
         $headline = trim((string) ($script['headline'] ?? ''));
         $points = array_values(array_filter(array_map(
             static fn ($point): string => trim((string) $point),
-            array_slice(is_array($script['points'] ?? null) ? $script['points'] : [], 0, 3)
+            array_slice(is_array($script['points'] ?? null) ? $script['points'] : [], 0, $sceneCount)
         ), static fn (string $point): bool => $point !== ''));
         $caption = trim((string) ($script['caption'] ?? ''));
         $hashtags = trim((string) ($script['hashtags'] ?? ''));
@@ -663,6 +679,8 @@ class ReelController extends Controller
         $localDisk = Storage::disk('local');
         $uploadedVideoPaths = [];
         $storedInputPaths = [];
+        $backgroundId = $validated['bg_preset'] ?? ($backgrounds[0]['id'] ?? null);
+        $backgroundSequence = false;
 
         if ($request->hasFile('videos') && count($request->file('videos')) > 0) {
             foreach ($request->file('videos') as $file) {
@@ -673,11 +691,10 @@ class ReelController extends Controller
                 }
             }
         } else {
-            $backgroundId = $validated['bg_preset'] ?? ($backgrounds[0]['id'] ?? null);
-            $selectedBackground = collect($backgrounds)->firstWhere('id', $backgroundId);
-
-            if ($selectedBackground && is_file($selectedBackground['path'])) {
-                $uploadedVideoPaths[] = $selectedBackground['path'];
+            $backgroundPaths = app(BackgroundSequenceSelector::class)->select($backgrounds, $backgroundId, $duration);
+            if ($backgroundPaths !== []) {
+                $uploadedVideoPaths = $backgroundPaths;
+                $backgroundSequence = count($backgroundPaths) > 1;
             } else {
                 $sampleSource = base_path('../python_engine/storage/input/sample.mp4');
                 if (is_file($sampleSource)) {
@@ -690,24 +707,27 @@ class ReelController extends Controller
             return redirect()->back()->withErrors(['idea' => 'يجب توفر مقطع فيديو للمعالجة.'])->withInput();
         }
 
-        $duration = (float) ($validated['duration'] ?? 10.0);
         $options = [
             'font_scale' => 100,
+            'font_family' => (string) ($validated['font_family'] ?? 'Tajawal'),
+            'text_effect' => (string) ($validated['text_effect'] ?? 'slide_up'),
             'background_dimming' => 35,
             'anti_border' => true,
-            'voiceover' => false,
-            'voiceover_tone' => 'neutral',
-            'accent_color' => $validated['accent_color'] ?? '#fb7185',
+            'voiceover' => $voiceoverEnabled,
+            'voiceover_tone' => $validated['voiceover_tone'] ?? 'warm',
+            'sound_effects' => $request->boolean('sound_effects_enabled'),
+            'accent_color' => $validated['accent_color'] ?? '#D6B87A',
             'quality' => 1080,
             'captions' => true,
-            'auto_music' => true,
+            'auto_music' => false,
             'manual_content' => true,
-            'motion_preset' => 'custom',
+            'motion_preset' => 'minimal',
             'text_motion' => 'vertical',
             'scene_transition' => 'template',
             'hook_word_by_word' => true,
             'highlight_important' => true,
-            'bg_preset' => $validated['bg_preset'] ?? null,
+            'bg_preset' => $backgroundId,
+            'background_sequence' => $backgroundSequence,
             'custom_headline' => $headline,
             'custom_points' => $points,
             'caption' => $caption,
@@ -736,10 +756,10 @@ class ReelController extends Controller
             'goal' => $validated['goal'] ?? 'followers',
             'language' => $language,
             'style' => 'engaging',
-            'template' => $validated['template'] ?? 'bold_stripe',
+            'template' => $validated['template'] ?? 'cinematic',
             'format_type' => $validated['format_type'] ?? 'quick_tip',
             'aspect_ratio' => '9:16',
-            'camera_motion' => 'zoom_in',
+            'camera_motion' => 'static',
             'anti_border_warning' => true,
             'duration' => $duration,
             'input_videos' => $storedInputPaths,
@@ -909,6 +929,8 @@ class ReelController extends Controller
 
         $options = array_merge([
             'font_scale' => 100,
+            'font_family' => 'Noto Kufi Arabic',
+            'text_effect' => 'none',
             'background_dimming' => 35,
             'anti_border' => (bool) $reel->anti_border_warning,
             'voiceover' => false,
@@ -923,6 +945,10 @@ class ReelController extends Controller
             'caption' => '',
             'hashtags' => '',
         ], $reel->render_options ?? []);
+        if (in_array($reel->progress_stage, ['voiceover_failed', 'voiceover_unavailable', 'voiceover_required'], true)) {
+            $options['voiceover'] = false;
+            $reel->render_options = array_merge($reel->render_options ?? [], ['voiceover' => false]);
+        }
         $manualContent = (bool) ($options['manual_content'] ?? false);
         $configuredKeys = json_decode((string) config('services.gemini.keys_json', '[]'), true);
         $geminiKeys = $manualContent ? [] : array_values(array_unique(array_filter(array_merge(

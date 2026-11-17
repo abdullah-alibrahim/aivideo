@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Jobs\GenerateReelVideo;
 use App\Models\Reel;
 use App\Models\ReelCollection;
+use App\Models\User;
 use App\Services\FactCheckService;
+use App\Support\StudioPaths;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -17,6 +19,7 @@ class ReelWorkflowTest extends TestCase
 {
     public function test_analytics_dashboard_renders_key_metrics(): void
     {
+        $this->actingAs(User::factory()->create(['is_admin' => true]));
         Reel::create(['title' => 'Complete', 'topic' => 'Complete', 'language' => 'en', 'status' => 'completed', 'duration' => 12]);
         Reel::create(['title' => 'Failed', 'topic' => 'Failed', 'language' => 'ar', 'status' => 'failed']);
 
@@ -29,6 +32,7 @@ class ReelWorkflowTest extends TestCase
 
     public function test_fact_check_endpoint_returns_structured_report(): void
     {
+        $this->actingAs(User::factory()->create());
         $this->mock(FactCheckService::class, function ($mock): void {
             $mock->shouldReceive('check')->once()->andReturn([
                 'status' => 'review',
@@ -53,6 +57,7 @@ class ReelWorkflowTest extends TestCase
 
     public function test_wizard_renders_in_arabic_with_a_csrf_token(): void
     {
+        $this->actingAs(User::factory()->create());
         $this->get(route('reels.wizard', ['lang' => 'ar']))
             ->assertOk()
             ->assertSee('name="csrf-token"', false)
@@ -85,7 +90,113 @@ class ReelWorkflowTest extends TestCase
             ->assertSee('id="sceneTransition"', false)
             ->assertSee('value="rainy_city_street"', false)
             ->assertSee($this->renderableBackgroundCount().' خلفية محلية')
+            ->assertSee('name="duration" value="60"', false)
             ->assertSee('مكتبة الخلفيات');
+    }
+
+    public function test_wizard_hides_the_environment_readiness_panel_in_both_languages(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        foreach (['ar', 'en'] as $language) {
+            $this->get(route('reels.wizard', ['lang' => $language]))
+                ->assertOk()
+                ->assertDontSee('id="readinessTitle"', false)
+                ->assertDontSee('جاهزية الاستوديو')
+                ->assertDontSee('Studio readiness');
+        }
+    }
+
+    public function test_wizard_hides_temporary_gemini_keys_and_their_explanation(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        foreach (['ar', 'en'] as $language) {
+            $this->get(route('reels.wizard', ['lang' => $language]))
+                ->assertOk()
+                ->assertDontSee('name="gemini_keys"', false)
+                ->assertDontSee('مفاتيح Gemini لهذه العملية')
+                ->assertDontSee('Gemini keys for this run')
+                ->assertDontSee('temporary API keys')
+                ->assertDontSee('مفاتيح API المؤقتة');
+        }
+    }
+
+    public function test_wizard_defaults_to_source_background_motion_and_sound_effects_without_narration(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        $this->get(route('reels.wizard', ['lang' => 'ar']))
+            ->assertOk()
+            ->assertDontSee('name="voiceover_enabled" value="1" checked', false)
+            ->assertSee('<option value="warm" selected', false)
+            ->assertSee('name="sound_effects_enabled" value="1" checked', false)
+            ->assertSee('<option value="minimal" selected', false)
+            ->assertSee('<option value="static" selected', false)
+            ->assertSee('value="60" checked', false)
+            ->assertDontSee('value="5" checked', false);
+    }
+
+    public function test_wizard_shows_mobile_step_progress_and_uses_a_font_pair_for_each_language(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        $this->get(route('reels.wizard', ['lang' => 'ar']))
+            ->assertOk()
+            ->assertSee('id="wizardStepProgress"', false)
+            ->assertSee('role="progressbar"', false)
+            ->assertSee('الخطوة 1 من 7')
+            ->assertSee("font-family: 'Cairo', 'Plus Jakarta Sans", false)
+            ->assertSee('يتم تحديث معاينة الخط من محرك التصدير', false)
+            ->assertSee('onchange="requestRealPreview()"', false)
+            ->assertSee('النقطة الأولى');
+
+        $this->get(route('reels.wizard', ['lang' => 'en']))
+            ->assertOk()
+            ->assertSee('Step 1 of 7')
+            ->assertSee("font-family: 'Plus Jakarta Sans', 'Cairo", false)
+            ->assertSee('Script point 1');
+    }
+
+    public function test_studio_admin_helper_uses_the_existing_admin_flag_when_present(): void
+    {
+        $user = new User(['email' => 'operator@example.com']);
+        $user->setAttribute('is_admin', true);
+
+        $this->assertTrue($user->isStudioAdmin());
+    }
+
+    public function test_one_click_scenario_defaults_to_sixty_seconds_and_keeps_eight_scenes(): void
+    {
+        $points = [];
+        for ($index = 1; $index <= 8; $index++) {
+            $points[] = "خطوة {$index} تساعدك على بناء عادة واضحة وتحقيق نتيجة أفضل كل يوم.";
+        }
+        $this->fakeGemini([
+            'title' => 'عادات مفيدة',
+            'headline' => 'ابدأ بعادة صغيرة اليوم',
+            'points' => $points,
+            'caption' => 'ابدأ بخطوة عملية',
+            'hashtags' => '#عادات',
+        ]);
+        $this->actingAs(User::factory()->create());
+        Queue::fake();
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->post(route('reels.scenario'), [
+            'idea' => 'بناء عادة مفيدة',
+            'language' => 'ar',
+            'videos' => [UploadedFile::fake()->createWithContent('source.mp4', "\x00\x00\x00\x18ftypmp42".str_repeat("\0", 128))],
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertDatabaseCount('reels', 1);
+        Queue::assertPushed(GenerateReelVideo::class, function (GenerateReelVideo $job): bool {
+            return $job->reel->duration === 60.0
+                && count($job->options['custom_points']) === 8
+                && count($job->inputPaths) === 1
+                && $job->options['background_sequence'] === false;
+        });
     }
 
     /**
@@ -97,7 +208,7 @@ class ReelWorkflowTest extends TestCase
         return collect(config('reel-backgrounds', []))->filter(function (array $background): bool {
             $directory = ($background['asset_directory'] ?? 'storage') === 'public'
                 ? public_path('backgrounds')
-                : \App\Support\StudioPaths::backgrounds();
+                : StudioPaths::backgrounds();
 
             return is_file($directory.'/'.$background['file']) && is_file($directory.'/'.$background['poster']);
         })->count();
@@ -165,6 +276,47 @@ class ReelWorkflowTest extends TestCase
             ->assertOk()
             ->assertSee('id="retryVideoBtn"', false)
             ->assertSee('<option value="en" selected>', false);
+    }
+
+    public function test_queued_render_explains_worker_wait_and_shows_wait_metadata(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        $reel = Reel::create([
+            'title' => 'Queued render',
+            'topic' => 'Queued render',
+            'language' => 'en',
+            'status' => 'queued',
+            'progress' => 0,
+            'progress_stage' => 'queued',
+        ]);
+
+        $this->get(route('reels.index', ['active' => $reel->id, 'lang' => 'en']))
+            ->assertOk()
+            ->assertSee('The render is queued and waiting for an available worker. It has not started yet.')
+            ->assertSee('id="renderWaitElapsed"', false)
+            ->assertSee('id="renderLastUpdated"', false)
+            ->assertSee('id="queueDelayNotice" aria-hidden="true"', false);
+    }
+
+    public function test_queued_render_shows_worker_guidance_after_two_minutes(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        $reel = Reel::create([
+            'title' => 'Long-waiting render',
+            'topic' => 'Long-waiting render',
+            'language' => 'en',
+            'status' => 'queued',
+            'progress' => 0,
+            'progress_stage' => 'queued',
+        ]);
+        $reel->forceFill(['created_at' => now()->subSeconds(120)])->save();
+
+        $this->get(route('reels.index', ['active' => $reel->id, 'lang' => 'en']))
+            ->assertOk()
+            ->assertSee('id="queueDelayNotice" aria-hidden="false"', false)
+            ->assertSee('Check the scheduled worker or another render ahead of this one.');
     }
 
     public function test_reel_status_endpoint_returns_progress_and_stage(): void
@@ -450,6 +602,7 @@ class ReelWorkflowTest extends TestCase
 
     public function test_scenario_turns_a_plain_idea_into_a_queued_manual_render(): void
     {
+        $this->actingAs(User::factory()->create());
         Queue::fake();
         Storage::fake('local');
         Storage::fake('public');
@@ -460,7 +613,11 @@ class ReelWorkflowTest extends TestCase
             'caption' => 'Two days, one project, zero excuses.',
             'hashtags' => '#focus #productivity #discipline',
         ]);
-        config(['services.gemini.keys_json' => json_encode(['test-gemini-key'])]);
+        config([
+            'services.gemini.keys_json' => json_encode(['test-gemini-key']),
+            'services.elevenlabs.api_key' => 'test-elevenlabs-key',
+            'services.elevenlabs.voice_ids.en' => 'test-voice-id',
+        ]);
 
         $response = $this->post(route('reels.scenario'), [
             'idea' => 'Commit to one project for the first 48 hours without distraction',
@@ -468,6 +625,9 @@ class ReelWorkflowTest extends TestCase
             'template' => 'bold_stripe',
             'duration' => 10,
             'goal' => 'saves',
+            'voiceover_enabled' => '1',
+            'voiceover_tone' => 'warm',
+            'sound_effects_enabled' => '1',
             'videos' => [UploadedFile::fake()->createWithContent('source.mp4', "\x00\x00\x00\x18ftypmp42".str_repeat("\0", 128))],
         ]);
 
@@ -482,10 +642,61 @@ class ReelWorkflowTest extends TestCase
         $this->assertSame('Give one project exactly 48 hours.', $reel->render_options['custom_headline']);
         $this->assertCount(3, $reel->render_options['custom_points']);
         $this->assertSame('bold_stripe', $reel->template);
+        $this->assertSame('static', $reel->camera_motion);
+        $this->assertSame('minimal', $reel->render_options['motion_preset']);
+        $this->assertSame('slide_up', $reel->render_options['text_effect']);
+        $this->assertTrue($reel->render_options['voiceover']);
+        $this->assertSame('warm', $reel->render_options['voiceover_tone']);
+        $this->assertTrue($reel->render_options['sound_effects']);
+        $this->assertSame('#D6B87A', $reel->render_options['accent_color']);
         $this->assertSame('saves', $reel->goal);
         $this->assertSame('Commit to one project for the first 48 hours without distraction', $reel->user_prompt);
         $this->assertNotEmpty($reel->quality_report['checks']);
         Queue::assertPushed(GenerateReelVideo::class, 1);
+    }
+
+    public function test_scenario_rejects_voiceover_without_elevenlabs_credentials_before_generation(): void
+    {
+        $this->actingAs(User::factory()->create());
+        Storage::fake('local');
+        Storage::fake('public');
+        $this->fakeGemini([
+            'title' => 'Test',
+            'headline' => 'A complete headline',
+            'points' => ['One', 'Two', 'Three'],
+            'caption' => 'Caption',
+            'hashtags' => '#test',
+        ]);
+        config([
+            'services.gemini.keys_json' => json_encode(['test-gemini-key']),
+            'services.elevenlabs.api_key' => null,
+            'services.elevenlabs.voice_ids.ar' => null,
+        ]);
+
+        $response = $this->from(route('reels.index', ['lang' => 'ar']))
+            ->followingRedirects()
+            ->post(route('reels.scenario'), [
+                'idea' => 'اختبار تعليق صوتي',
+                'language' => 'ar',
+                'voiceover_enabled' => '1',
+            ]);
+
+        $response->assertOk()
+            ->assertSee('أضف مفتاح ElevenLabs نشطاً وVoice ID عربياً قبل توليد سيناريو مع تعليق صوتي.');
+        $this->assertDatabaseCount('reels', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_scenario_form_defaults_to_transition_sound_effects_without_narration(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->get(route('reels.index', ['lang' => 'ar']))
+            ->assertOk()
+            ->assertDontSee('name="voiceover_enabled" value="1" checked', false)
+            ->assertSee('name="voiceover_tone"', false)
+            ->assertSee('<option value="warm" selected', false)
+            ->assertSee('<option value="60" selected>60s</option>', false)
+            ->assertSee('name="sound_effects_enabled" value="1" checked', false);
     }
 
     public function test_scenario_rejects_an_incomplete_gemini_script_without_queuing(): void
