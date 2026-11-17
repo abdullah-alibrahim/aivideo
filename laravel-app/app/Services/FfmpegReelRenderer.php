@@ -169,13 +169,17 @@ class FfmpegReelRenderer implements RenderEngine
                 @file_put_contents($thumbnailTemporary, 'fake thumb');
             }
 
-            $disk = Storage::disk('public');
-            $disk->makeDirectory(dirname($outputRelativePath));
-            $disk->makeDirectory(dirname($thumbnailRelativePath));
-            $disk->makeDirectory(dirname($subtitleRelativePath));
-            $disk->put($outputRelativePath, file_get_contents($outputTemporary));
-            $disk->put($thumbnailRelativePath, file_get_contents($thumbnailTemporary));
-            $disk->put($subtitleRelativePath, file_get_contents($subtitleTemporary));
+            $videoDest = \App\Support\StudioPaths::videos().'/'.$outputRelativePath;
+            $thumbDest = \App\Support\StudioPaths::videos().'/'.$thumbnailRelativePath;
+            $subDest = \App\Support\StudioPaths::videos().'/'.$subtitleRelativePath;
+
+            @mkdir(dirname($videoDest), 0755, true);
+            @mkdir(dirname($thumbDest), 0755, true);
+            @mkdir(dirname($subDest), 0755, true);
+
+            @copy($outputTemporary, $videoDest);
+            @copy($thumbnailTemporary, $thumbDest);
+            @copy($subtitleTemporary, $subDest);
             $reel->forceFill(['progress' => 96, 'progress_stage' => 'finalizing'])->save();
 
             return [
