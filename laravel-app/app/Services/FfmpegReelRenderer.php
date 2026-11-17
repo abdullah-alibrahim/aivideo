@@ -177,9 +177,9 @@ class FfmpegReelRenderer implements RenderEngine
             \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($thumbDest));
             \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($subDest));
 
-            \Illuminate\Support\Facades\File::copy($outputTemporary, $videoDest);
-            \Illuminate\Support\Facades\File::copy($thumbnailTemporary, $thumbDest);
-            \Illuminate\Support\Facades\File::copy($subtitleTemporary, $subDest);
+            copy($outputTemporary, $videoDest);
+            copy($thumbnailTemporary, $thumbDest);
+            copy($subtitleTemporary, $subDest);
 
             \Log::info('Render published files', [
                 'video_dest' => $videoDest,
