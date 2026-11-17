@@ -180,6 +180,12 @@ class FfmpegReelRenderer implements RenderEngine
             \Illuminate\Support\Facades\File::copy($outputTemporary, $videoDest);
             \Illuminate\Support\Facades\File::copy($thumbnailTemporary, $thumbDest);
             \Illuminate\Support\Facades\File::copy($subtitleTemporary, $subDest);
+
+            \Log::info('Render published files', [
+                'video_dest' => $videoDest,
+                'video_exists' => file_exists($videoDest),
+                'video_size' => file_exists($videoDest) ? filesize($videoDest) : 0,
+            ]);
             $reel->forceFill(['progress' => 96, 'progress_stage' => 'finalizing'])->save();
 
             return [
