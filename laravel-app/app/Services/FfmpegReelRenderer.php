@@ -170,9 +170,9 @@ class FfmpegReelRenderer implements RenderEngine
             $disk->makeDirectory(dirname($outputRelativePath));
             $disk->makeDirectory(dirname($thumbnailRelativePath));
             $disk->makeDirectory(dirname($subtitleRelativePath));
-            $this->publishFile($outputTemporary, $disk->path($outputRelativePath));
-            $this->publishFile($thumbnailTemporary, $disk->path($thumbnailRelativePath));
-            $this->publishFile($subtitleTemporary, $disk->path($subtitleRelativePath));
+            $disk->put($outputRelativePath, file_get_contents($outputTemporary));
+            $disk->put($thumbnailRelativePath, file_get_contents($thumbnailTemporary));
+            $disk->put($subtitleRelativePath, file_get_contents($subtitleTemporary));
             $reel->forceFill(['progress' => 96, 'progress_stage' => 'finalizing'])->save();
 
             return [
