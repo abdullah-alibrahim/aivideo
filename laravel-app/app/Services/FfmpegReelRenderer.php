@@ -173,13 +173,13 @@ class FfmpegReelRenderer implements RenderEngine
             $thumbDest = \App\Support\StudioPaths::videos().'/'.$thumbnailRelativePath;
             $subDest = \App\Support\StudioPaths::videos().'/'.$subtitleRelativePath;
 
-            @mkdir(dirname($videoDest), 0755, true);
-            @mkdir(dirname($thumbDest), 0755, true);
-            @mkdir(dirname($subDest), 0755, true);
+            \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($videoDest));
+            \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($thumbDest));
+            \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($subDest));
 
-            @copy($outputTemporary, $videoDest);
-            @copy($thumbnailTemporary, $thumbDest);
-            @copy($subtitleTemporary, $subDest);
+            \Illuminate\Support\Facades\File::copy($outputTemporary, $videoDest);
+            \Illuminate\Support\Facades\File::copy($thumbnailTemporary, $thumbDest);
+            \Illuminate\Support\Facades\File::copy($subtitleTemporary, $subDest);
             $reel->forceFill(['progress' => 96, 'progress_stage' => 'finalizing'])->save();
 
             return [
