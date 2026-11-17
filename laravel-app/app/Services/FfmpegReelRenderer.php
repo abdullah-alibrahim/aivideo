@@ -173,9 +173,17 @@ class FfmpegReelRenderer implements RenderEngine
             $thumbDest = \App\Support\StudioPaths::videos().'/'.$thumbnailRelativePath;
             $subDest = \App\Support\StudioPaths::videos().'/'.$subtitleRelativePath;
 
-            $this->publishFile($outputTemporary, $videoDest);
-            $this->publishFile($thumbnailTemporary, $thumbDest);
-            $this->publishFile($subtitleTemporary, $subDest);
+            \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($videoDest));
+            \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($thumbDest));
+            \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($subDest));
+
+            \Illuminate\Support\Facades\File::copy($outputTemporary, $videoDest);
+            \Illuminate\Support\Facades\File::copy($thumbnailTemporary, $thumbDest);
+            \Illuminate\Support\Facades\File::copy($subtitleTemporary, $subDest);
+
+            @chmod($videoDest, 0644);
+            @chmod($thumbDest, 0644);
+            @chmod($subDest, 0644);
 
             \Log::info('Render published files', [
                 'video_dest' => $videoDest,
