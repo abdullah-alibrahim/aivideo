@@ -166,7 +166,7 @@ class FfmpegReelRenderer implements RenderEngine
                 throw $this->failure('render_failed', true, $language, 'FFmpeg did not create a thumbnail.');
             }
 
-            $disk = Storage::disk('private');
+            $disk = Storage::disk('public');
             $disk->makeDirectory(dirname($outputRelativePath));
             $disk->makeDirectory(dirname($thumbnailRelativePath));
             $disk->makeDirectory(dirname($subtitleRelativePath));
@@ -417,7 +417,7 @@ class FfmpegReelRenderer implements RenderEngine
     /** @param list<string> $paths */
     private function deletePublished(array $paths): void
     {
-        Storage::disk('private')->delete($paths);
+        Storage::disk('public')->delete($paths);
     }
 
     private function failure(string $stage, bool $retryable, string $language, string $logMessage = ''): RenderFailedException
