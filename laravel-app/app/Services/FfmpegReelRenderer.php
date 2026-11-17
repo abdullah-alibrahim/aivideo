@@ -417,10 +417,12 @@ class FfmpegReelRenderer implements RenderEngine
             throw $this->failure('render_failed', true, 'en', 'Unable to create render output directory.');
         }
         if (@copy($source, $destination)) {
+            @chmod($destination, 0644);
             @unlink($source);
             return;
         }
         if (@rename($source, $destination)) {
+            @chmod($destination, 0644);
             return;
         }
 
