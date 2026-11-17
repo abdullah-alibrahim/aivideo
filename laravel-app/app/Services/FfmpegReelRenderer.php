@@ -409,10 +409,14 @@ class FfmpegReelRenderer implements RenderEngine
     private function publishFile(string $source, string $destination): void
     {
         $directory = dirname($destination);
-        if (! is_dir($directory) && ! mkdir($directory, 0755, true) && ! is_dir($directory)) {
+        if (! is_dir($directory) && ! @mkdir($directory, 0755, true) && ! is_dir($directory)) {
             throw $this->failure('render_failed', true, 'en', 'Unable to create render output directory.');
         }
-        if (rename($source, $destination)) {
+        if (@copy($source, $destination)) {
+            @unlink($source);
+            return;
+        }
+        if (@rename($source, $destination)) {
             return;
         }
 
