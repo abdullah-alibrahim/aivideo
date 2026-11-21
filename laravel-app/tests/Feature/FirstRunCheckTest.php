@@ -73,6 +73,14 @@ class FirstRunCheckTest extends TestCase
             ->assertViewHas('report');
     }
 
+    public function test_first_run_page_uses_the_saved_interface_language_without_a_query_parameter(): void
+    {
+        $this->withSession(['app_locale' => 'en'])
+            ->get(route('first-run'))
+            ->assertOk()
+            ->assertSee('<html lang="en" dir="ltr"', false);
+    }
+
     public function test_first_run_check_endpoint_returns_json(): void
     {
         $this->getJson(route('first-run.check'))

@@ -15,10 +15,15 @@ use Illuminate\View\View;
 
 class FirstRunController extends Controller
 {
-    public function index(FirstRunChecker $checker): View
+    public function index(Request $request, FirstRunChecker $checker): View
     {
-        $lang = in_array(request()->query('lang'), ['ar', 'en'], true) ? request()->query('lang') : 'ar';
+        $requestedLanguage = $request->query('lang');
+        $sessionLanguage = session('app_locale');
+        $lang = in_array($requestedLanguage, ['ar', 'en'], true)
+            ? $requestedLanguage
+            : (in_array($sessionLanguage, ['ar', 'en'], true) ? $sessionLanguage : 'ar');
         session(['app_locale' => $lang]);
+        app()->setLocale($lang);
 
         return view('first-run.index', [
             'lang' => $lang,

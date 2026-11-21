@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\ProviderApiKey;
 use App\Models\ProviderSetting;
+use App\Models\User;
 use App\Services\ProviderKeyRing;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\DB;
@@ -12,6 +13,16 @@ use Tests\TestCase;
 
 class ProviderApiKeyManagementTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->actingAs(User::factory()->create([
+            'email_verified_at' => now(),
+            'is_admin' => true,
+        ]));
+    }
+
     public function test_multiple_gemini_and_elevenlabs_keys_are_encrypted_and_only_masked_in_the_screen(): void
     {
         $secrets = [

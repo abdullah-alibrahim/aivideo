@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ProviderApiKey;
+use App\Models\User;
 use App\Services\EncryptedFileStore;
 use App\Services\SecretManager;
 use App\Support\StudioPaths;
@@ -96,7 +97,13 @@ class SecretStoreTest extends TestCase
         ]);
         app(SecretManager::class)->store()->store((string) $key->secret_ref, 'eleven_purge_secret');
 
-        $this->post(route('settings.provider-keys.purge', ['lang' => 'ar']))
+        $admin = User::factory()->create([
+            'email_verified_at' => now(),
+            'is_admin' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('settings.provider-keys.purge', ['lang' => 'ar']))
             ->assertRedirect(route('settings.provider-keys', ['lang' => 'ar']));
 
         $this->assertDatabaseCount('provider_api_keys', 0);

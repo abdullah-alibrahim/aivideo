@@ -501,10 +501,14 @@ def _clean_json(raw):
     return raw
 
 
-def _ai_prompt(topic, niche, goal, language, user_prompt="", style="engaging", format_type="full_idea", target_country="Global"):
+def _ai_prompt(topic, niche, goal, language, user_prompt="", style="engaging", format_type="full_idea", target_country="Global", duration=60):
     lang_label = "English" if language == "en" else "Arabic"
+    import math
+    dur = max(3.0, float(duration))
+    scene_count = min(10, max(3, int(math.ceil(dur / 7.5))))
+    target_words = max(8, int(round(dur * 2)))
     return f"""
-You are a careful short-form video script editor. Do not promise virality or invent facts.
+You are a careful, elite short-form video script editor for Instagram Reels, TikTok, and YouTube Shorts. Do not promise virality or invent facts.
 Topic: "{topic}"
 User's full brief: "{user_prompt or topic}"
 Niche: "{niche}"
@@ -513,18 +517,19 @@ Target audience market: "{target_country}"
 Style: "{style}"
 Format: "{format_type}"
 Language: {lang_label}
+Video duration: approximately {int(round(dur))} seconds.
 
 Generate a JSON object with:
 1. "headline": A clear, accurate title (max 8 words).
 2. "hook": The spoken opening line (max 10 words). It must make sense within the first 0.8 seconds; no "in this video" or slow introductions.
-3. "scenes": 3-4 objects, each:
+3. "scenes": Exactly {scene_count} objects calibrated for a {int(round(dur))}-second video, each:
    {{
-     "text": short on-card phrase (max 7 words),
-     "caption": the full spoken sentence (max 18 words),
+     "text": short on-card phrase (max 6 words),
+     "caption": the full spoken sentence (max 16 words),
      "emphasis": one word that appears in "text" and deserves the accent color,
-     "duration": suggested seconds between 1.2 and 3.5
+     "duration": suggested seconds between 2.0 and 8.0
    }}
-   Each scene must teach one concrete idea. Do not repeat the hook.
+   Each scene must teach one concrete idea. Total spoken words across all scenes should be about {target_words} words for natural pacing. Do not repeat the hook.
 4. "cta": one short imperative call to action (max 5 words, e.g. "Save this for later").
 5. "caption": A relevant post caption; do not invent a personal story or unsupported outcome.
 6. "hashtags": 4-7 relevant general hashtags; do not claim they are trending.
@@ -545,9 +550,9 @@ def _safe_provider_failure(exc):
     return None, "provider error"
 
 
-def _try_gemini_key(key, topic, niche, goal, language, user_prompt="", style="engaging", format_type="full_idea", target_country="Global"):
+def _try_gemini_key(key, topic, niche, goal, language, user_prompt="", style="engaging", format_type="full_idea", target_country="Global", duration=60):
     import urllib.request
-    prompt = _ai_prompt(topic, niche, goal, language, user_prompt, style, format_type, target_country)
+    prompt = _ai_prompt(topic, niche, goal, language, user_prompt, style, format_type, target_country, duration=duration)
     last_exc = None
     for model in ("gemini-3-flash-preview", "gemini-3.5-flash", "gemini-2.5-flash"):
         try:
@@ -685,7 +690,7 @@ def _normalize_ai_package(data, language="en"):
     return normalized
 
 
-def generate_ai_package(topic, niche="productivity", goal="followers", language="en", style="engaging", gemini_api_keys=None, user_prompt="", format_type="full_idea", target_country="Global", progress_file=None):
+def generate_ai_package(topic, niche="productivity", goal="followers", language="en", style="engaging", gemini_api_keys=None, user_prompt="", format_type="full_idea", target_country="Global", progress_file=None, duration=60):
     """
     Generate complete bundle. Tries all supplied/known keys and models until one
     succeeds; otherwise fails without generating local content.
@@ -703,7 +708,7 @@ def generate_ai_package(topic, niche="productivity", goal="followers", language=
     last_failure_message = "provider error"
     for key in gemini_keys:
         try:
-            data = _try_gemini_key(key, topic, niche, goal, language, user_prompt, style, format_type, target_country)
+            data = _try_gemini_key(key, topic, niche, goal, language, user_prompt, style, format_type, target_country, duration=duration)
             if data:
                 normalized = _normalize_ai_package(data, language)
                 if normalized:
@@ -961,7 +966,7 @@ def _horizontal_reveal_mask_frame(base_mask, time, direction="right", reveal_dur
     return base_mask * reveal[None, :]
 
 
-def render_reference_card(package, size=(1080, 1920), duration=6, template="classic", handle="", anti_border=True, language="en", accent_color="#fb7185", font_scale=100, include_branding=True, include_cta=True, kicker=None, progress=None):
+def render_reference_card(package, size=(1080, 1920), duration=6, template="classic", handle="", anti_border=True, language="en", accent_color="#fb7185", font_scale=100, include_branding=True, include_cta=True, kicker=None, progress=None, point_number=None, numbered_points=None):
     """
     Renders a text-card overlay with the selected visual template:
     - Floating round profile badge with logo icon
@@ -1028,6 +1033,8 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
     # Determine headline text color per template
     if template == "clean_news":
         text_fill = (15, 23, 42)
+    elif template == "numbered_list":
+        text_fill = (248, 250, 252)
     else:
         text_fill = (255, 255, 255)
 
@@ -1058,8 +1065,11 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
     head_h = (len(headline_lines) * head_line_height) + round(40 * scale)
 
     if progress is not None:
-        # Single-idea scenes read better when the card sits near the optical center.
-        cur_y = max(int(height * 0.24), int((height - head_h) * 0.40))
+        if template == "numbered_list":
+            cur_y = max(int(height * 0.12), int((height - head_h) * 0.18))
+        else:
+            # Single-idea scenes read better when the card sits near the optical center.
+            cur_y = max(int(height * 0.24), int((height - head_h) * 0.40))
 
     # Template styling
     if template == "clean_news":
@@ -1089,6 +1099,21 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
         echo = max(4, round(5 * scale))
         draw.rectangle([stripe + echo, cur_y, stripe + echo * 3, cur_y + head_h], fill=accent_rgb + (90,))
         text_fill = (255, 255, 255)
+    elif template == "numbered_list":
+        draw.rounded_rectangle(
+            [margin_x, cur_y, width - margin_x, cur_y + head_h],
+            radius=round(18 * scale),
+            fill=(10, 20, 42, 245),
+            outline=accent_rgb + (255,),
+            width=max(2, round(3 * scale)),
+        )
+        stripe = max(8, round(12 * scale))
+        draw.rounded_rectangle(
+            [margin_x, cur_y, width - margin_x, cur_y + stripe],
+            radius=max(3, round(5 * scale)),
+            fill=accent_rgb + (255,),
+        )
+        text_fill = (248, 250, 252)
     else:  # Classic glass card.
         draw.rounded_rectangle([margin_x, cur_y, width - margin_x, cur_y + head_h], radius=24, fill=(15, 23, 42, 230), outline=(255, 255, 255, 40), width=2)
         text_fill = (255, 255, 255)
@@ -1097,7 +1122,7 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
         bar_x = width - margin_x - 12 if language == "ar" else margin_x + 6
         draw.rounded_rectangle([bar_x, cur_y + 18, bar_x + 6, cur_y + head_h - 18], radius=3, fill=accent_rgb + (230,))
 
-    if kicker:
+    if kicker and not (template == "numbered_list" and point_number is not None):
         kicker_text = _display_word(str(kicker), language)
         kicker_font = font_arabic_kicker if contains_arabic(str(kicker)) else font_kicker
         kicker_box = draw.textbbox((0, 0), kicker_text, font=kicker_font)
@@ -1132,20 +1157,87 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
     cur_y += head_h + 30
 
     # 3. Points Cards (1, 2, 3)
-    points = [package.get("point_1", ""), package.get("point_2", ""), package.get("point_3", "")]
+    points = numbered_points if template == "numbered_list" and isinstance(numbered_points, list) else [
+        package.get("point_1", ""),
+        package.get("point_2", ""),
+        package.get("point_3", ""),
+    ]
     points = [p for p in points if p]
+    numbered_lines = []
+
+    if template == "numbered_list" and points:
+        list_font_size = max(14, round(34 * scale))
+        min_list_font_size = max(12, round(20 * scale))
+        list_gap = max(6, round(12 * scale))
+        bottom_limit = int(height * (0.77 if anti_border else 0.88))
+        while list_font_size >= min_list_font_size:
+            font_point = get_font(list_font_size, bold=True)
+            font_number_point = get_number_font(list_font_size, bold=True)
+            font_arabic_point = get_arabic_font(list_font_size) if has_arabic_content else None
+            point_line_height = max(18, round(list_font_size * 1.28))
+            number_badge_size = max(round(36 * scale), round(list_font_size * 1.9))
+            point_text_width = card_w - number_badge_size - round(54 * scale)
+            numbered_lines = [
+                wrap_tokens(
+                    tokenize_styled(str(point).strip(), accent_rgb, (18, 24, 38), emphasis),
+                    font_point,
+                    point_text_width,
+                    draw,
+                    language,
+                    font_number_point,
+                    font_arabic_point,
+                )
+                for point in points
+            ]
+            heights = [
+                max(number_badge_size + round(14 * scale), len(lines) * point_line_height + round(22 * scale))
+                for lines in numbered_lines
+            ]
+            if cur_y + sum(heights) + list_gap * max(0, len(heights) - 1) <= bottom_limit:
+                break
+            list_font_size -= 1
 
     for idx, pt in enumerate(points):
         point_text = str(pt).strip()
         first_word = point_text.split(maxsplit=1)[0] if point_text else ""
-        if point_text and not is_number_token(first_word):
+        if template != "numbered_list" and point_text and not is_number_token(first_word):
             point_text = f"{idx + 1}. {point_text}"
-        p_tokens = tokenize_styled(point_text, accent_rgb, (255, 255, 255), emphasis)
-        p_lines = wrap_tokens(p_tokens, font_point, card_w - 70, draw, language, font_number_point, font_arabic_point)
-        p_height = (len(p_lines) * point_line_height) + round(36 * scale)
+        p_text_fill = (18, 24, 38) if template == "numbered_list" else (255, 255, 255)
+        p_tokens = tokenize_styled(point_text, accent_rgb, p_text_fill, emphasis)
+        number_badge_size = max(round(36 * scale), round(font_point.size * 1.9)) if template == "numbered_list" else 0
+        point_text_width = card_w - 70
+        if template == "numbered_list":
+            point_text_width -= number_badge_size + round(54 * scale)
+        p_lines = numbered_lines[idx] if template == "numbered_list" and numbered_lines else wrap_tokens(
+            p_tokens, font_point, point_text_width, draw, language, font_number_point, font_arabic_point
+        )
+        p_height = (len(p_lines) * point_line_height) + round((22 if template == "numbered_list" else 36) * scale)
 
         # Draw point container card
-        draw.rounded_rectangle([margin_x, cur_y, width - margin_x, cur_y + p_height], radius=20, fill=(15, 23, 42, 215), outline=(255, 255, 255, 30), width=2)
+        if template == "numbered_list":
+            p_height = max(p_height, number_badge_size + round(14 * scale))
+            draw.rounded_rectangle(
+                [margin_x, cur_y, width - margin_x, cur_y + p_height],
+                radius=round(20 * scale),
+                fill=(250, 250, 248, 250),
+                outline=accent_rgb + (255,) if point_number == idx + 1 else (10, 20, 42, 255),
+                width=max(3, round((6 if point_number == idx + 1 else 5) * scale)),
+            )
+            badge_x = width - margin_x - number_badge_size - round(14 * scale) if language == "ar" else margin_x + round(14 * scale)
+            badge_y = cur_y + (p_height - number_badge_size) // 2
+            draw.rounded_rectangle(
+                [badge_x, badge_y, badge_x + number_badge_size, badge_y + number_badge_size],
+                radius=round(16 * scale),
+                fill=accent_rgb + (255,),
+            )
+            badge_font = get_number_font(round(44 * scale), bold=True)
+            badge_text = str(idx + 1)
+            badge_bounds = draw.textbbox((0, 0), badge_text, font=badge_font)
+            badge_text_x = badge_x + (number_badge_size - (badge_bounds[2] - badge_bounds[0])) // 2
+            badge_text_y = badge_y + (number_badge_size - (badge_bounds[3] - badge_bounds[1])) // 2 - badge_bounds[1]
+            draw.text((badge_text_x, badge_text_y), badge_text, font=badge_font, fill=(10, 20, 42, 255))
+        else:
+            draw.rounded_rectangle([margin_x, cur_y, width - margin_x, cur_y + p_height], radius=20, fill=(15, 23, 42, 215), outline=(255, 255, 255, 30), width=2)
 
         space_w = int(draw.textlength(' ', font=font_point)) or 1
         # Draw text with warm highlight for numbers and accent words
@@ -1153,10 +1245,13 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
             # Calculate alignment based on language
             lw = rich_line_width(pline, font_point, draw, language, font_number_point, font_arabic_point)
             if any(contains_arabic(word) for word, _ in pline):
-                right_x = width - margin_x - round(30 * scale)
+                if template == "numbered_list":
+                    right_x = badge_x - round(18 * scale)
+                else:
+                    right_x = width - margin_x - round(30 * scale)
             else:
-                px = margin_x + round(30 * scale)
-            py = cur_y + round(18 * scale) + (j * point_line_height)
+                px = badge_x + number_badge_size + round(18 * scale) if template == "numbered_list" else margin_x + round(30 * scale)
+            py = cur_y + (p_height - len(p_lines) * point_line_height) // 2 + (j * point_line_height) if template == "numbered_list" else cur_y + round(18 * scale) + (j * point_line_height)
 
             if any(contains_arabic(word) for word, _ in pline):
                 for word, color in pline:
@@ -1173,7 +1268,7 @@ def render_reference_card(package, size=(1080, 1920), duration=6, template="clas
                     draw.text((px, py), display_word, font=word_font, fill=color)
                     px += int(draw.textlength(display_word, font=word_font)) + space_w
 
-        cur_y += p_height + 20
+        cur_y += p_height + (list_gap if template == "numbered_list" else 20)
 
     # 5. Anti-Border Warning Template (قوالب ضد تحذير الحدود)
     if anti_border:
@@ -1705,13 +1800,13 @@ def build_scene_specs(package, topic, language="en"):
         })
 
     if not points:
-        for index in range(1, 4):
+        for index in range(1, 11):
             point = str(package.get(f"point_{index}", "")).strip()
             point = re.sub(r"^\s*\d{1,2}[.)،:-]?\s*", "", point)
             if point:
                 points.append({"text": point, "caption": point, "emphasis": "", "kind": "point", "hint": None, "min": 1.25})
 
-    specs.extend(points[:4])
+    specs.extend(points[:10])
     cta = str(package.get("cta") or ("Save this for later" if language == "en" else "احفظ هذا وارجع له لاحقاً")).strip()
     specs.append({"text": cta, "caption": "", "emphasis": "", "kind": "cta", "hint": 1.4, "min": 1.3})
 
@@ -1759,7 +1854,11 @@ def build_preview_image(args):
     if not headline:
         headline = "معاينة حقيقية" if args.language == "ar" else "Live preview"
 
-    if points:
+    if points and getattr(args, "template", "classic") == "numbered_list":
+        package = {"headline": headline, "emphasis": "", "point_1": "", "point_2": "", "point_3": ""}
+        kicker = f"01 / {max(1, len(points)):02d}"
+        include_branding = False
+    elif points:
         package = {"headline": points[0], "emphasis": "", "point_1": "", "point_2": "", "point_3": ""}
         kicker = f"01 / {max(1, len(points)):02d}"
         include_branding = False
@@ -1782,6 +1881,8 @@ def build_preview_image(args):
         include_cta=False,
         kicker=kicker,
         progress=(1, max(2, len(points) + 2)),
+        point_number=1 if points and getattr(args, "template", "classic") == "numbered_list" else None,
+        numbered_points=points if points and getattr(args, "template", "classic") == "numbered_list" else None,
     )
 
     source = getattr(overlay, "img", None)
@@ -1834,23 +1935,40 @@ def build_ultra_reel(args):
     platform_key = resolve_platform(getattr(args, "platform", "generic"))
     platform_caps = PLATFORM_PRESETS[platform_key]
     resolution = quality_resolution(getattr(args, "quality", 1080), args.aspect_ratio)
+    render_duration = float(args.duration)
     progress_file = getattr(args, "progress_file", None)
     custom_pts = args.custom_points if getattr(args, "custom_points", None) else []
     custom_headline = str(getattr(args, "custom_headline", None) or "").strip()
-    if getattr(args, "manual_content", False):
-        if not custom_headline or not custom_pts:
-            raise ValueError("Manual content requires a headline and at least one script line.")
-        scenes = [
+    custom_scenes_json = getattr(args, "custom_scenes_json", None)
+    parsed_scenes = []
+    if custom_scenes_json:
+        try:
+            raw = json.loads(custom_scenes_json)
+            if isinstance(raw, list):
+                for item in raw:
+                    norm = _normalize_storyboard_scene(item)
+                    if norm:
+                        parsed_scenes.append(norm)
+        except Exception as exc:
+            print(f"[Warning] Could not parse custom_scenes_json: {exc}")
+
+    if not parsed_scenes and custom_pts:
+        parsed_scenes = [
             {"text": str(point).strip(), "caption": str(point).strip(), "emphasis": "", "duration": None, "kind": "point"}
             for point in custom_pts if str(point).strip()
         ]
+
+    if getattr(args, "manual_content", False):
+        if not custom_headline and not parsed_scenes:
+            raise ValueError("Manual content requires a headline and at least one script line.")
+        headline = custom_headline or (parsed_scenes[0]["text"] if parsed_scenes else args.topic)
         package = {
-            "headline": custom_headline,
-            "hook": custom_headline,
-            "scenes": scenes,
-            "point_1": scenes[0]["caption"] if scenes else "",
-            "point_2": scenes[1]["caption"] if len(scenes) > 1 else "",
-            "point_3": scenes[2]["caption"] if len(scenes) > 2 else "",
+            "headline": headline,
+            "hook": headline,
+            "scenes": parsed_scenes,
+            "point_1": parsed_scenes[0]["caption"] if parsed_scenes else "",
+            "point_2": parsed_scenes[1]["caption"] if len(parsed_scenes) > 1 else "",
+            "point_3": parsed_scenes[2]["caption"] if len(parsed_scenes) > 2 else "",
             "cta": "Save this for later" if args.language == "en" else "احفظ هذا وارجع له لاحقاً",
             "caption": "",
             "hashtags": "",
@@ -1872,13 +1990,18 @@ def build_ultra_reel(args):
             format_type=getattr(args, "format_type", "full_idea"),
             target_country=getattr(args, "target_country", "Global"),
             progress_file=progress_file,
+            duration=render_duration,
         )
-        if custom_headline or custom_pts:
+        if custom_headline or custom_pts or parsed_scenes:
+            scenes = parsed_scenes or base_package.get("scenes") or []
             package = {
                 "headline": custom_headline or base_package.get("headline", args.topic),
-                "point_1": custom_pts[0] if len(custom_pts) > 0 else base_package.get("point_1", ""),
-                "point_2": custom_pts[1] if len(custom_pts) > 1 else base_package.get("point_2", ""),
-                "point_3": custom_pts[2] if len(custom_pts) > 2 else base_package.get("point_3", ""),
+                "hook": custom_headline or base_package.get("hook", base_package.get("headline", args.topic)),
+                "scenes": scenes,
+                "point_1": custom_pts[0] if len(custom_pts) > 0 else (scenes[0]["caption"] if scenes else base_package.get("point_1", "")),
+                "point_2": custom_pts[1] if len(custom_pts) > 1 else (scenes[1]["caption"] if len(scenes) > 1 else base_package.get("point_2", "")),
+                "point_3": custom_pts[2] if len(custom_pts) > 2 else (scenes[2]["caption"] if len(scenes) > 2 else base_package.get("point_3", "")),
+                "cta": base_package.get("cta", "Save this for later" if args.language == "en" else "احفظ هذا وارجع له لاحقاً"),
                 "caption": base_package.get("caption", ""),
                 "hashtags": base_package.get("hashtags", ""),
                 "score": None,
@@ -1938,6 +2061,7 @@ def build_ultra_reel(args):
             render_duration = max(render_duration, float(voiceover_clip.duration) + 0.35)
 
         scene_specs = build_scene_specs(package, args.topic, args.language)
+        numbered_points = [spec["text"] for spec in scene_specs if spec["kind"] == "point"]
         plan_texts = [spec["caption"] or spec["text"] for spec in scene_specs]
         scene_durations = plan_scene_durations(
             plan_texts,
@@ -1984,17 +2108,27 @@ def build_ultra_reel(args):
                     progress=(index + 1, total_scenes),
                 )
             else:
+                point_number = None
                 if spec["kind"] == "hook":
                     kicker = "HOOK" if args.language == "en" else "هوك"
                 else:
                     point_index += 1
                     kicker = f"{point_index:02d} / {total_points:02d}"
+                    point_number = point_index
+
+                numbered_layout = args.template == "numbered_list"
+                if numbered_layout:
+                    scene_headline = str(package.get("headline") or spec["text"])
+                    scene_point = spec["text"] if spec["kind"] == "point" else ""
+                else:
+                    scene_headline = spec["text"]
+                    scene_point = ""
 
                 overlay = render_reference_card(
                     package={
-                        "headline": "" if (spec["kind"] == "hook" and getattr(args, "hook_word_by_word", False)) else spec["text"],
+                        "headline": "" if (spec["kind"] == "hook" and getattr(args, "hook_word_by_word", False)) else scene_headline,
                         "emphasis": spec["emphasis"] if getattr(args, "highlight_important", True) else "",
-                        "point_1": "",
+                        "point_1": scene_point,
                         "point_2": "",
                         "point_3": "",
                     },
@@ -2010,6 +2144,8 @@ def build_ultra_reel(args):
                     include_cta=False,
                     kicker=kicker,
                     progress=(index + 1, total_scenes),
+                    point_number=point_number if numbered_layout else None,
+                    numbered_points=numbered_points if numbered_layout else None,
                 )
 
             overlay = animate_reference_overlay(
@@ -2209,7 +2345,7 @@ def main():
     parser.add_argument("--target-country", default="Global", choices=["US", "UK", "Canada", "Australia", "Global"])
     parser.add_argument("--style", default="engaging")
     parser.add_argument("--format-type", default="full_idea", choices=["full_idea", "quick_tip", "list", "story"])
-    parser.add_argument("--template", default="classic", choices=["classic", "clean_news", "cinematic", "quote_card", "bold_stripe"])
+    parser.add_argument("--template", default="classic", choices=["classic", "clean_news", "cinematic", "quote_card", "bold_stripe", "numbered_list"])
     parser.add_argument("--handle", default="")
     parser.add_argument("--aspect-ratio", default="9:16", choices=["9:16", "1:1", "16:9"])
     parser.add_argument("--camera-motion", default="zoom_in", choices=["static", "zoom_in", "pan", "parallax"])
@@ -2220,13 +2356,14 @@ def main():
     parser.add_argument("--font-scale", type=int, default=100)
     parser.add_argument("--background-dimming", type=int, default=35)
     parser.add_argument("--anti-border", action="store_true")
-    parser.add_argument("--accent-color", default="#fb7185")
+    parser.add_argument("--accent-color", default="#D6B87A")
     parser.add_argument("--music", "-m", default=None)
     parser.add_argument("--voiceover", action="store_true")
     parser.add_argument("--voiceover-tone", default="neutral", choices=["neutral", "calm", "warm", "energetic"])
     parser.add_argument("--gemini-api-key", "-g", action="append", default=None, dest="gemini_api_keys")
     parser.add_argument("--custom-headline", default=None)
     parser.add_argument("--custom-points", nargs="*", default=None)
+    parser.add_argument("--custom-scenes-json", default=None, help="JSON list of scene dicts with text, caption, emphasis.")
     parser.add_argument("--manual-content", action="store_true", help="Use the supplied headline and points without contacting Gemini.")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--progress-file", default=None, help="Write render progress as JSON for the queue worker.")

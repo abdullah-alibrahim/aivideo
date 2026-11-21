@@ -39,15 +39,6 @@ return [
             'report' => false,
         ],
 
-        'public' => [
-            'driver' => 'local',
-            'root' => StudioPaths::videos(),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
-            'visibility' => 'public',
-            'throw' => false,
-            'report' => false,
-        ],
-
         'local' => [
             'driver' => 'local',
             'root' => StudioPaths::uploads(),

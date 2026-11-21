@@ -51,6 +51,42 @@ class AssOverlayBuilderTest extends TestCase
         }
     }
 
+    public function test_the_hormozi_preset_uses_yellow_and_green_with_automatic_emoji(): void
+    {
+        $ass = $this->build(options: ['subtitle_preset' => 'hormozi']);
+
+        $this->assertMatchesRegularExpression('/^Style: Headline,.*,&H0000FFFF,/m', $ass);
+        $this->assertMatchesRegularExpression('/^Style: Points,.*,&H0000FF00,/m', $ass);
+        $this->assertMatchesRegularExpression('/[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]/u', $ass);
+    }
+
+    public function test_an_explicit_timeline_overrides_text_and_timing(): void
+    {
+        $ass = $this->build(options: [
+            'timeline' => [
+                ['kind' => 'headline', 'text' => 'HOOK EDIT', 'start' => 0.0, 'end' => 2.0],
+                ['kind' => 'point', 'text' => 'SCENE EDIT', 'start' => 2.0, 'end' => 6.0],
+                ['kind' => 'cta', 'text' => 'CTA EDIT', 'start' => 8.0, 'end' => 10.0],
+            ],
+        ]);
+
+        $this->assertStringContainsString('HOOK EDIT', $ass);
+        $this->assertStringContainsString('SCENE EDIT', $ass);
+        $this->assertStringContainsString('CTA EDIT', $ass);
+        $this->assertStringContainsString('0:00:02.00', $ass);
+        $this->assertStringContainsString('0:00:08.00', $ass);
+        $this->assertStringNotContainsString('اشرب الماء', $ass);
+    }
+
+    public function test_it_accepts_every_trending_preset(): void
+    {
+        foreach (['classic', 'hormozi', 'karaoke', 'minimal', 'news'] as $preset) {
+            $ass = $this->build(options: ['subtitle_preset' => $preset]);
+            $this->assertStringContainsString('PlayResX: 1080', $ass);
+            $this->assertStringContainsString('Style: Headline', $ass);
+        }
+    }
+
     public function test_it_supports_the_fade_in_effect(): void
     {
         $ass = $this->build(options: ['text_effect' => 'fade_in']);
@@ -82,6 +118,31 @@ class AssOverlayBuilderTest extends TestCase
         $this->assertStringNotContainsString('\fad(', $ass);
         $this->assertStringNotContainsString('\move(', $ass);
         $this->assertStringNotContainsString('\fscx', $ass);
+    }
+
+    public function test_it_highlights_numbers_and_urgency_words_with_the_accent_colour(): void
+    {
+        $ass = $this->build(
+            content: ['points' => ['وفّر 20% من دخلك الآن']],
+            options: ['highlight_important' => true, 'accent_color' => '#D6B87A'],
+        );
+
+        $this->assertStringContainsString('\1c&H007AB8D6&', $ass);
+    }
+
+    public function test_it_keeps_the_long_hook_short_so_body_scenes_get_airtime(): void
+    {
+        $ass = $this->build(duration: 60.0);
+        $headlineLine = '';
+        foreach (explode("\n", $ass) as $line) {
+            if (str_starts_with($line, 'Dialogue:') && str_contains($line, ',Headline,')) {
+                $headlineLine = $line;
+                break;
+            }
+        }
+
+        $this->assertNotSame('', $headlineLine);
+        $this->assertLessThanOrEqual(6.0, $this->dialogueDuration($headlineLine));
     }
 
     public function test_it_only_accepts_known_font_families(): void

@@ -35,6 +35,12 @@ return [
         ],
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI', env('APP_URL').'/auth/google/callback'),
+    ],
+
     'gemini' => [
         'keys_json' => env('AIVIDEO_GEMINI_KEYS_JSON', '[]'),
         'api_key' => env('GEMINI_API_KEY'),

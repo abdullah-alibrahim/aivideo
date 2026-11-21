@@ -17,6 +17,17 @@ class PythonReelRenderer implements RenderEngine
     public function __construct(private readonly ProviderKeyRing $keyRing) {}
 
     /** @param array<string, mixed> $options */
+    public function renderDraftVideo(array $options, string $outputPath): void
+    {
+        throw new RenderFailedException(
+            stage: 'preview_failed',
+            retryable: false,
+            userMessage: trans('studio.errors.preview_failed', [], (string) ($options['language'] ?? 'ar')),
+            logMessage: 'Draft video previews are only available with the FFmpeg render driver.',
+        );
+    }
+
+    /** @param array<string, mixed> $options */
     public function renderPreview(array $options, string $outputPath): void
     {
         $language = (string) ($options['language'] ?? 'ar');
@@ -66,6 +77,7 @@ class PythonReelRenderer implements RenderEngine
 
         $process = new Process($command, base_path('../'), [
             'AIVIDEO_ARABIC_FONT' => (string) config('studio.engine.arabic_font', ''),
+            'PYTHONPATH' => base_path('../venv/lib/python3.9/site-packages'),
         ]);
         $process->setTimeout(60);
 
@@ -321,6 +333,11 @@ class PythonReelRenderer implements RenderEngine
             }
         }
 
+        if (! empty($options['custom_scenes']) && is_array($options['custom_scenes'])) {
+            $command[] = '--custom-scenes-json';
+            $command[] = json_encode(array_values($options['custom_scenes']), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
         return $command;
     }
 
@@ -345,6 +362,7 @@ class PythonReelRenderer implements RenderEngine
             'ELEVENLABS_VOICE_ID_AR' => $this->elevenLabsVoiceId('ar'),
             'ELEVENLABS_VOICE_ID_EN' => $this->elevenLabsVoiceId('en'),
             'AIVIDEO_ARABIC_FONT' => (string) config('studio.engine.arabic_font', ''),
+            'PYTHONPATH' => base_path('../venv/lib/python3.9/site-packages'),
             'PYTHON_DOTENV_DISABLED' => '1',
         ];
     }

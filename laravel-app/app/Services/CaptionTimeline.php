@@ -149,6 +149,156 @@ class CaptionTimeline
     }
 
     /**
+     * Replace estimated scene timings with timings measured from the spoken
+     * narration. Segments that cannot be found in the narration keep their
+     * estimated window, so alignment never drops a caption.
+     *
+     * @param  array{hook:array{text:string,start:float,end:float}|null,body:list<array{text:string,start:float,end:float}>,cta:array{text:string,start:float,end:float}|null}  $plan
+     * @param  list<array{text:string,start:float,end:float}>  $words
+     * @return array{hook:array{text:string,start:float,end:float}|null,body:list<array{text:string,start:float,end:float}>,cta:array{text:string,start:float,end:float}|null}
+     */
+    public function alignToWords(array $plan, array $words, float $duration): array
+    {
+        if ($words === []) {
+            return $plan;
+        }
+
+        $duration = max(3.0, $duration);
+        $tokens = array_map(fn (array $word): array => $this->tokens($word['text']), $words);
+        $cursor = 0;
+
+        $assign = function (array $segment) use (&$cursor, $words, $tokens): array {
+            $match = $this->matchSegment((string) $segment['text'], $tokens, $cursor);
+            if ($match === null) {
+                return $segment;
+            }
+
+            [$first, $last] = $match;
+            $cursor = $last + 1;
+            $start = (float) $words[$first]['start'];
+            $end = (float) $words[$last]['end'];
+
+            return ['text' => $segment['text'], 'start' => $start, 'end' => max($start + 0.35, $end)];
+        };
+
+        $hook = ! empty($plan['hook']) ? $assign($plan['hook']) : null;
+        $body = [];
+        foreach ($plan['body'] as $point) {
+            $body[] = $assign($point);
+        }
+        $cta = ! empty($plan['cta']) ? $assign($plan['cta']) : null;
+
+        $flat = [];
+        if ($hook !== null) {
+            $flat[] = ['target' => 'hook', 'index' => null, 'segment' => $hook];
+        }
+        foreach ($body as $index => $point) {
+            $flat[] = ['target' => 'body', 'index' => $index, 'segment' => $point];
+        }
+        if ($cta !== null) {
+            $flat[] = ['target' => 'cta', 'index' => null, 'segment' => $cta];
+        }
+
+        $previousEnd = 0.0;
+        foreach ($flat as $position => $item) {
+            $start = max($previousEnd, (float) $item['segment']['start']);
+            $end = max($start + 0.35, (float) $item['segment']['end']);
+            $flat[$position]['segment']['start'] = $start;
+            $flat[$position]['segment']['end'] = $end;
+            $previousEnd = $end;
+        }
+
+        if ($previousEnd > $duration) {
+            $scale = $duration / $previousEnd;
+            foreach ($flat as $position => $item) {
+                $flat[$position]['segment']['start'] = (float) $item['segment']['start'] * $scale;
+                $flat[$position]['segment']['end'] = min($duration, (float) $item['segment']['end'] * $scale);
+            }
+        } elseif ($cta !== null) {
+            foreach ($flat as $position => $item) {
+                if ($item['target'] === 'cta') {
+                    $flat[$position]['segment']['end'] = $duration;
+                }
+            }
+        }
+
+        $hook = null;
+        $body = [];
+        $cta = null;
+        foreach ($flat as $item) {
+            if ($item['target'] === 'hook') {
+                $hook = $item['segment'];
+            } elseif ($item['target'] === 'cta') {
+                $cta = $item['segment'];
+            } else {
+                $body[(int) $item['index']] = $item['segment'];
+            }
+        }
+        ksort($body);
+
+        return ['hook' => $hook, 'body' => array_values($body), 'cta' => $cta];
+    }
+
+    /** @return list<string> */
+    private function tokens(string $text): array
+    {
+        $text = mb_strtolower($text, 'UTF-8');
+        $text = (string) preg_replace('/\p{Mn}+/u', '', $text);
+        $parts = preg_split('/[^\p{L}\p{N}]+/u', $text) ?: [];
+
+        return array_values(array_filter($parts, static fn (string $part): bool => $part !== ''));
+    }
+
+    /**
+     * @param  list<list<string>>  $tokens
+     * @return array{int, int}|null first and last matched word index
+     */
+    private function matchSegment(string $text, array $tokens, int $cursor): ?array
+    {
+        $textTokens = $this->tokens($text);
+        $needle = array_values(array_unique($textTokens));
+        $total = count($tokens);
+        if ($needle === [] || $total === 0) {
+            return null;
+        }
+
+        $required = max(1, (int) ceil(count($needle) * 0.6));
+        $length = count($textTokens);
+        $bestScore = 0;
+        $bestStart = null;
+        $bestLength = $length;
+
+        for ($start = max(0, $cursor); $start < $total; $start++) {
+            for ($size = max(1, $length - 2); $size <= $length + 2; $size++) {
+                if ($start + $size > $total) {
+                    break;
+                }
+                $remaining = array_flip($needle);
+                $score = 0;
+                for ($offset = 0; $offset < $size; $offset++) {
+                    foreach ($tokens[$start + $offset] as $token) {
+                        if (isset($remaining[$token])) {
+                            unset($remaining[$token]);
+                            $score++;
+                        }
+                    }
+                }
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                    $bestStart = $start;
+                    $bestLength = $size;
+                }
+            }
+        }
+
+        if ($bestStart === null || $bestScore < $required) {
+            return null;
+        }
+
+        return [$bestStart, min($total - 1, $bestStart + $bestLength - 1)];
+    }
+
+    /**
      * @param  array{hook:array{text:string,start:float,end:float}|null,body:list<array{text:string,start:float,end:float}>,cta:array{text:string,start:float,end:float}|null}  $plan
      * @return list<array{kind:string,text:string,start:float,end:float}>
      */

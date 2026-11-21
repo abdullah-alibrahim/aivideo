@@ -31,6 +31,7 @@ class GenerateReelVideo implements ShouldQueue
         public ?string $musicPath,
         public array $options,
         public string $outputRelativePath,
+        public ?string $dispatchToken = null,
     ) {}
 
     public function handle(RenderEngine $renderer): void
@@ -38,6 +39,13 @@ class GenerateReelVideo implements ShouldQueue
         $reel = $this->reel->fresh();
 
         if (! $reel instanceof Reel || $reel->status === 'completed') {
+            return;
+        }
+
+        // A retry (or a watchdog recovery) replaces the token, so an old job
+        // that was stuck in the queue must not render the reel again.
+        if ($this->dispatchToken !== null
+            && data_get($reel->render_options, '_dispatch_token') !== $this->dispatchToken) {
             return;
         }
 
@@ -108,6 +116,11 @@ class GenerateReelVideo implements ShouldQueue
             return;
         }
 
+        if ($this->dispatchToken !== null
+            && data_get($reel->render_options, '_dispatch_token') !== $this->dispatchToken) {
+            return;
+        }
+
         if ($reel->cancel_requested_at || $reel->status === 'cancellation_requested') {
             $this->markCancelled($reel);
 
@@ -140,6 +153,13 @@ class GenerateReelVideo implements ShouldQueue
             $hashtags = isset($data['hashtags']) ? (string) $data['hashtags'] : null;
         }
 
+        $renderOptions = $reel->render_options ?? [];
+        if (is_array($data['timeline'] ?? null) && $data['timeline'] !== []) {
+            // Keep the exact text and timing so another aspect ratio can be
+            // rendered later without asking the AI for new content.
+            $renderOptions['_last_timeline'] = $data['timeline'];
+        }
+
         $reel->forceFill([
             'status' => 'completed',
             'progress' => 100,
@@ -154,6 +174,7 @@ class GenerateReelVideo implements ShouldQueue
             'content_source' => $data['content_source'] ?? 'gemini',
             'ai_model' => $data['ai_model'] ?? null,
             'score' => null,
+            'render_options' => $renderOptions,
             'duration' => isset($data['duration'])
                 ? max((float) $reel->duration, (float) $data['duration'])
                 : $reel->duration,

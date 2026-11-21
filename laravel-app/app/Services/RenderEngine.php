@@ -15,4 +15,7 @@ interface RenderEngine
 
     /** @param array<string, mixed> $options */
     public function renderPreview(array $options, string $outputPath): void;
+
+    /** @param array<string, mixed> $options */
+    public function renderDraftVideo(array $options, string $outputPath): void;
 }

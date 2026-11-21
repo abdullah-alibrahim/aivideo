@@ -73,6 +73,30 @@ class RenderQueueTest extends TestCase
         $this->assertArrayNotHasKey('gemini_keys', $reel->render_options);
     }
 
+    public function test_video_language_does_not_change_the_interface_language_after_generation(): void
+    {
+        $this->actingAs(User::factory()->create())->withSession(['app_locale' => 'en']);
+        Queue::fake();
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $response = $this->from(route('reels.wizard', ['lang' => 'en']))
+            ->post(route('reels.store'), array_merge($this->samplePayload(), [
+                'language' => 'ar',
+                'manual_content' => '1',
+                'headline' => 'عنوان تجريبي',
+                'line1' => 'سطر تجريبي',
+                'bg_preset' => 'rainy_city_street',
+            ]));
+
+        $reel = Reel::query()->firstOrFail();
+        $response->assertRedirect(route('reels.index', ['active' => $reel->id, 'lang' => 'en']))
+            ->assertSessionHas('success', trans('studio.flash.queued', [], 'en'));
+        $this->assertSame('ar', $reel->language);
+        $this->assertSame('en', session('app_locale'));
+        $this->get(route('reels.index'))->assertSee('<html lang="en" dir="ltr"', false);
+    }
+
     public function test_generation_accepts_a_custom_duration_and_preserves_it_for_rendering(): void
     {
         $this->actingAs(User::factory()->create());
@@ -90,6 +114,55 @@ class RenderQueueTest extends TestCase
         $reel = Reel::query()->firstOrFail();
         $this->assertSame(37.0, $reel->duration);
         Queue::assertPushed(GenerateReelVideo::class, fn (GenerateReelVideo $job): bool => $job->reel->duration === 37.0);
+    }
+
+    public function test_manual_wizard_script_preserves_every_scene_and_approved_cta_for_rendering(): void
+    {
+        $this->actingAs(User::factory()->create());
+        Queue::fake();
+
+        $this->post(route('reels.store'), array_merge($this->samplePayload(), [
+            'manual_content' => '1',
+            'headline' => 'A practical savings hook',
+            'line1' => 'Track small expenses',
+            'line2' => 'Choose a weekly limit',
+            'line3' => 'Move savings automatically',
+            'custom_points' => ['Review your progress', 'Adjust next month'],
+            'cta' => 'Start your plan today',
+            'bg_preset' => 'rainy_city_street',
+        ]))->assertRedirect();
+
+        $reel = Reel::query()->firstOrFail();
+        $expectedPoints = [
+            'Track small expenses',
+            'Choose a weekly limit',
+            'Move savings automatically',
+            'Review your progress',
+            'Adjust next month',
+        ];
+
+        $this->assertSame($expectedPoints, $reel->render_options['custom_points']);
+        $this->assertSame('Start your plan today', $reel->render_options['cta']);
+        Queue::assertPushed(GenerateReelVideo::class, fn (GenerateReelVideo $job): bool => $job->options['custom_points'] === $expectedPoints
+            && $job->options['cta'] === 'Start your plan today');
+    }
+
+    public function test_numbered_list_design_is_preserved_in_the_queued_render(): void
+    {
+        $this->actingAs(User::factory()->create());
+        Queue::fake();
+
+        $this->post(route('reels.store'), array_merge($this->samplePayload(), [
+            'template' => 'numbered_list',
+            'manual_content' => '1',
+            'headline' => 'Phrases for a billing call',
+            'line1' => 'Please send an itemized statement.',
+            'bg_preset' => 'rainy_city_street',
+        ]))->assertRedirect();
+
+        $reel = Reel::query()->firstOrFail();
+        $this->assertSame('numbered_list', $reel->template);
+        Queue::assertPushed(GenerateReelVideo::class, fn (GenerateReelVideo $job): bool => $job->reel->template === 'numbered_list');
     }
 
     public function test_generation_rejects_durations_outside_ten_to_sixty_seconds(): void

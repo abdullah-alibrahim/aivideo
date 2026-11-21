@@ -66,6 +66,13 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'render_errors' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/render-errors.log'),
+            'level' => 'error',
+            'replace_placeholders' => true,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => StudioPaths::logs().'/laravel.log',

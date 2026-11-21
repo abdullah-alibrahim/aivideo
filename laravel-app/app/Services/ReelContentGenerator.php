@@ -19,19 +19,21 @@ class ReelContentGenerator
         $language = (string) ($reel->language ?: 'en');
         $customHeadline = trim((string) ($options['custom_headline'] ?? ''));
         $customPoints = $this->normalizeStrings((array) ($options['custom_points'] ?? []));
+        $customCta = trim((string) ($options['cta'] ?? ''));
         $caption = trim((string) ($options['caption'] ?? ''));
         $hashtags = trim((string) ($options['hashtags'] ?? ''));
+        $manual = (bool) ($options['manual_content'] ?? false);
 
-        if ((bool) ($options['manual_content'] ?? false)) {
+        if ($manual) {
             if ($customHeadline === '' || $customPoints === []) {
                 throw $this->failure('invalid_result', false, $language);
             }
 
             return $this->result(
-                $this->script($customHeadline, $customPoints, [], $language),
+                $this->script($customHeadline, $customPoints, [], $language, $customCta !== '' ? $customCta : null),
                 $customHeadline,
                 $customPoints,
-                $language === 'en' ? 'Save this for later' : 'احفظ هذا وارجع له لاحقاً',
+                $customCta !== '' ? $customCta : ($language === 'en' ? 'Save this for later' : 'احفظ هذا وارجع له لاحقاً'),
                 $caption,
                 $hashtags,
                 'manual',
@@ -40,13 +42,15 @@ class ReelContentGenerator
         }
 
         try {
-            $response = $this->gemini->generate($this->prompt($reel));
+            $response = $this->gemini->generate($this->prompt($reel, $options));
         } catch (RuntimeException $exception) {
             throw $this->geminiFailure($exception, $language);
         }
 
         $data = is_array($response['data'] ?? null) ? $response['data'] : [];
-        $scenes = $this->normalizeScenes($data['scenes'] ?? null);
+        $duration = max(3.0, (float) ($reel->duration ?: 10));
+        $sceneCount = (new VideoScriptPacing)->sceneCount($duration);
+        $scenes = $this->normalizeScenes($data['scenes'] ?? null, $sceneCount);
         $headline = $this->firstString($data, ['headline', 'title', 'hook']);
         if ($headline === '' && $scenes !== []) {
             $headline = $scenes[0]['text'];
@@ -61,19 +65,31 @@ class ReelContentGenerator
             $hook = $customHeadline;
         }
 
-        $points = $scenes === []
-            ? $this->normalizeStrings([
-                $this->firstString($data, ['point_1', 'point1', 'step_1', 'step1']),
-                $this->firstString($data, ['point_2', 'point2', 'step_2', 'step2']),
-                $this->firstString($data, ['point_3', 'point3', 'step_3', 'step3']),
-            ])
-            : array_column($scenes, 'text');
-        if ($customPoints !== []) {
-            $points = $customPoints;
-            $scenes = array_map(static fn (string $point): array => ['text' => $point, 'caption' => $point], $points);
+        if ($scenes !== []) {
+            $points = array_column($scenes, 'text');
+        } else {
+            $points = $this->normalizeStrings(is_array($data['points'] ?? null) ? $data['points'] : []);
+            if ($points === []) {
+                $pointValues = [];
+                for ($index = 1; $index <= $sceneCount; $index++) {
+                    $pointValues[] = $this->firstString($data, [
+                        'point_'.$index, 'point'.$index, 'step_'.$index, 'step'.$index,
+                    ]);
+                }
+                $points = $this->normalizeStrings($pointValues);
+            }
         }
         if ($points === []) {
             throw $this->failure('gemini_failed', true, $language);
+        }
+
+        if ($scenes === []) {
+            foreach ($points as $point) {
+                $scenes[] = [
+                    'text' => $point,
+                    'caption' => $point,
+                ];
+            }
         }
 
         $cta = $this->firstString($data, ['cta', 'call_to_action'])
@@ -90,32 +106,44 @@ class ReelContentGenerator
             $hashtags,
             'gemini',
             is_string($response['model'] ?? null) ? $response['model'] : null,
+            $scenes,
         );
     }
 
-    private function prompt(Reel $reel): string
+    private function prompt(Reel $reel, array $options): string
     {
         $language = $reel->language === 'ar' ? 'Arabic' : 'English';
+        $duration = max(3.0, (float) ($reel->duration ?: 10));
+        $pacing = new VideoScriptPacing;
+        $customPoints = $this->normalizeStrings((array) ($options['custom_points'] ?? []));
+        $customHeadline = trim((string) ($options['custom_headline'] ?? ''));
         $context = [
             'topic' => $reel->topic,
             'brief' => $reel->user_prompt ?: $reel->topic,
+            'opening_hook' => $customHeadline,
             'niche' => $reel->niche,
             'goal' => $reel->goal,
             'target_country' => $reel->target_country,
             'style' => $reel->style,
             'format' => $reel->format_type,
             'language' => $language,
+            'duration_seconds' => (int) round($duration),
+            'scene_count' => $pacing->sceneCount($duration),
+            'target_spoken_words' => $pacing->targetWordCount($duration),
+            'scene_guidance' => $customPoints,
         ];
 
         return 'You are a careful short-form video script editor. Do not promise virality or invent facts. '
-            .'Generate a JSON object with headline (max 8 words), hook (max 10 spoken words), scenes (3-4 objects with text, caption, emphasis, duration), '
-            .'cta (short imperative), caption, and hashtags (4-7 general tags). Each scene teaches one concrete idea and does not repeat the hook. '
+            .'Generate a JSON object with headline (max 8 words), hook (max 10 spoken words), exactly '.$context['scene_count'].' scenes (each object has text, caption, emphasis, duration), '
+            .'cta (short imperative), caption, and hashtags (4-7 general tags). The spoken script should be about '.$context['target_spoken_words'].' words in total and fit the requested duration at a natural pace. '
+            .'Each scene caption must exactly match its spoken text so overlays and narration stay synchronized. Use scene_guidance as topic direction, not as a replacement for the requested scenes. '
+            .'When opening_hook is provided, use it verbatim as the opening hook. Each scene teaches one concrete idea and does not repeat the hook. '
             .'Keep every sentence accurate and specific. Output only valid JSON. Context: '
             .json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 
     /** @return list<array{text:string,caption:string}> */
-    private function normalizeScenes(mixed $rawScenes): array
+    private function normalizeScenes(mixed $rawScenes, int $limit): array
     {
         if (! is_array($rawScenes)) {
             return [];
@@ -141,7 +169,7 @@ class ReelContentGenerator
                 'text' => $text,
                 'caption' => $this->firstString($scene, ['caption', 'subtitle']) ?: $text,
             ];
-            if (count($scenes) === 4) {
+            if (count($scenes) >= $limit) {
                 break;
             }
         }

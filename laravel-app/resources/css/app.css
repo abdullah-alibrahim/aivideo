@@ -7,6 +7,83 @@
     --font-sans: 'Cairo', 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
 }
 
+::selection {
+    background: rgb(251 191 36 / 0.28);
+    color: #fff;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    text-rendering: optimizeLegibility;
+}
+
+/* Ambient backdrop shared by the public site and the studio pages. */
+.aurora-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.aurora-bg::before,
+.aurora-bg::after {
+    content: '';
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(90px);
+}
+
+.aurora-bg::before {
+    top: -22rem;
+    inset-inline-end: -14rem;
+    width: 46rem;
+    height: 46rem;
+    background: radial-gradient(closest-side, rgb(245 158 11 / 0.13), transparent 70%);
+}
+
+.aurora-bg::after {
+    top: 18rem;
+    inset-inline-start: -18rem;
+    width: 38rem;
+    height: 38rem;
+    background: radial-gradient(closest-side, rgb(56 189 248 / 0.08), transparent 70%);
+}
+
+.gradient-text {
+    background: linear-gradient(180deg, #ffffff 20%, #cbd5e1 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.glass-header {
+    background: rgb(7 17 31 / 0.82);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.card-lift {
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), border-color 220ms ease, box-shadow 220ms ease, background-color 220ms ease;
+}
+
+.card-lift:hover {
+    transform: translateY(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+
+    .card-lift:hover {
+        transform: none;
+    }
+}
+
 .background-filter-pill {
     flex: 0 0 auto;
     border: 1px solid rgb(51 65 85);

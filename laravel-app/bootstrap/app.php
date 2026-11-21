@@ -1,6 +1,10 @@
 <?php
 
+use App\Http\Middleware\EnsureActiveAccount;
+use App\Http\Middleware\EnsureFirstRunAccess;
+use App\Http\Middleware\EnsureStudioAdmin;
 use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\SetApplicationLocale;
 use App\Http\Middleware\StudioAccess;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -14,7 +18,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->alias(['studio.access' => StudioAccess::class]);
+        $middleware->alias([
+            'studio.access' => StudioAccess::class,
+            'studio.admin' => EnsureStudioAdmin::class,
+            'first-run.access' => EnsureFirstRunAccess::class,
+            'account.active' => EnsureActiveAccount::class,
+        ]);
+        $middleware->web(append: [SetApplicationLocale::class]);
         $middleware->append(SecurityHeaders::class);
         $middleware->validateCsrfTokens(except: [
             'api/*',

@@ -5,9 +5,28 @@
     $activeId = request('active');
     $activeReel = $activeId ? $reels->firstWhere('id', $activeId) : $reels->first();
     $qualityReport = $activeReel?->quality_report ?? [];
+    $resolveErrorMessage = static function (?string $message, ?string $language) use ($lang): ?string {
+        return $message !== null && str_starts_with($message, 'studio.errors.')
+            ? __($message, [], $language ?? $lang)
+            : $message;
+    };
+    $activeErrorMessage = $resolveErrorMessage($activeReel?->error_message, $activeReel?->language);
     $niches = ['money' => '💰 مال', 'habits' => '☀️ عادات', 'psychology' => '🧠 علم نفس', 'tech' => '⚡ تكنولوجيا', 'business' => '📈 أعمال', 'productivity' => '⚙️ إنتاجية'];
     $stageLabels = __('studio.stages');
     $isProcessing = $activeReel && in_array($activeReel->status, ['queued', 'processing', 'cancellation_requested'], true);
+    $queueWaitSeconds = $activeReel?->status === 'queued'
+        ? max(0, now()->getTimestamp() - ($activeReel->created_at?->getTimestamp() ?? now()->getTimestamp()))
+        : 0;
+    $queueWaitText = sprintf('%02d:%02d', intdiv($queueWaitSeconds, 60), $queueWaitSeconds % 60);
+    $pendingReel = $isProcessing
+        ? ['url' => route('reels.status', $activeReel), 'queuedSeconds' => $queueWaitSeconds]
+        : null;
+    $renderMessages = [
+        'queued' => __('studio.render_status.queued', [], $lang),
+        'processing' => __('studio.render_status.processing', [], $lang),
+        'cancellation_requested' => __('studio.render_status.cancellation_requested', [], $lang),
+        'refresh_failed' => __('studio.render_status.refresh_failed', [], $lang),
+    ];
 @endphp
 <html lang="{{ $isAr ? 'ar' : 'en' }}" dir="{{ $dir }}" class="dark">
 <head>
@@ -17,7 +36,7 @@
     @vite(["resources/css/app.css", "resources/js/app.js"])
 
     <style>
-        body { font-family: '{{ $isAr ? "Cairo" : "Plus Jakarta Sans" }}', sans-serif; background: #070b12; color: #f1f5f9; min-height: 100vh; }
+        body { font-family: '{{ $isAr ? "Cairo" : "Plus Jakarta Sans" }}', sans-serif; background: radial-gradient(1100px 520px at 85% -10%, rgba(245, 158, 11, 0.06) 0%, transparent 60%), radial-gradient(900px 480px at -10% 22%, rgba(56, 189, 248, 0.05) 0%, transparent 60%), #070b12; background-attachment: fixed; color: #f1f5f9; min-height: 100vh; }
         .studio-card { background: linear-gradient(180deg, #111827 0%, #0d131f 100%); border: 1px solid rgba(255,255,255,0.08); border-radius: 1.5rem; box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5); }
         .studio-card:hover { border-color: rgba(255, 255, 255, 0.12); }
         .feature-box { background: #111a2e; border: 1px solid #1e2c47; border-radius: 1.25rem; padding: 1.25rem; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -29,6 +48,24 @@
         #videoWrapper[data-playing="true"] #studioVideoPlayer { transform: scale(1.008); }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+        }
+        @media (max-width: 768px) {
+            [data-background-option] {
+                animation-delay: 0s !important;
+            }
+            .background-picker-grid,
+            [data-background-picker] .grid {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 0.75rem !important;
+            }
+            .reel-preview-frame,
+            #step4PreviewBox,
+            #liveDesignCardBox,
+            #step7PreviewCard {
+                height: 220px;
+                min-height: 220px;
+            }
+            .studio-card { padding: 1rem; }
         }
         .stat-card { background: linear-gradient(135deg, #111827 0%, #131c2e 100%); border: 1px solid rgba(255,255,255,0.07); border-radius: 1.25rem; padding: 1.1rem 1.35rem; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
         .badge-pill { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.28rem 0.75rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; }
@@ -52,8 +89,10 @@
 </head>
 <body class="antialiased">
 
+    <div class="aurora-bg" aria-hidden="true"></div>
+
     <!-- Top Navigation Bar -->
-    <header class="bg-[#0b111c] border-b border-slate-800 sticky top-0 z-50 shadow-xl">
+    <header class="bg-[#0b111c]/85 backdrop-blur-xl border-b border-white/5 sticky top-0 z-50 shadow-lg shadow-black/20">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-18 flex flex-wrap items-center justify-between gap-3 py-3">
             <!-- Logo -->
             <div class="flex items-center gap-3 flex-shrink min-w-0">
@@ -98,10 +137,15 @@
                     <i class="fa-solid fa-list-check"></i>
                     <span>{{ $isAr ? 'ويزارد' : 'Wizard' }}</span>
                 </a>
-                @if (auth()->user()?->is_admin)
+                @if (auth()->user()?->isStudioAdmin())
                 <a href="{{ route('analytics.dashboard', ['lang' => $lang]) }}" class="hidden md:flex px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 font-bold text-xs border border-sky-500/30 transition items-center gap-1.5">
                     <i class="fa-solid fa-chart-line"></i>
                     <span>{{ $isAr ? 'التحليلات' : 'Analytics' }}</span>
+                </a>
+
+                <a href="{{ route('admin.users', ['lang' => $lang]) }}" class="hidden md:flex px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-xs border border-emerald-500/30 transition items-center gap-1.5">
+                    <i class="fa-solid fa-users"></i>
+                    <span>{{ $isAr ? 'المستخدمون' : 'Users' }}</span>
                 </a>
 
                 <a href="{{ route('settings.provider-keys', ['lang' => $lang]) }}" aria-label="{{ $isAr ? 'إدارة المفاتيح' : 'Manage keys' }}" class="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition flex items-center gap-1.5">
@@ -132,6 +176,16 @@
             <i class="fa-solid fa-circle-exclamation text-xl flex-shrink-0"></i>
             <div class="font-bold text-sm">{{ session('error') }}</div>
             <details class="mt-1 text-[11px] text-rose-400"><summary class="cursor-pointer">تفاصيل الخطأ</summary><pre class="mt-1 whitespace-pre-wrap text-[10px]">{{ session('error') }}</pre></details>
+        </div>
+        @endif
+        @if(isset($errors) && $errors->any())
+        <div role="alert" class="rounded-2xl border border-rose-500/40 bg-rose-950/50 p-4 text-rose-200 animate-fadeinup">
+            <p class="mb-2 text-sm font-bold">{{ $isAr ? 'راجع إعدادات التوليد:' : 'Review the generation settings:' }}</p>
+            <ul class="list-disc space-y-1 ps-5 text-xs">
+                @foreach($errors->all() as $error)
+                <li>{{ $error }}</li>
+                @endforeach
+            </ul>
         </div>
         @endif
 
@@ -167,6 +221,15 @@
                     <p class="text-slate-200 mt-0.5 leading-relaxed">{{ $scenario['caption'] }}</p>
                     @if(! empty($scenario['hashtags']))
                     <p class="text-amber-400 text-[11px] mt-1.5 font-bold">{{ $scenario['hashtags'] }}</p>
+                    @endif
+                </div>
+                @endif
+                @if(! empty($scenario['design_notes']))
+                <div class="rounded-xl bg-slate-900/70 border border-amber-500/25 px-3 py-2.5">
+                    <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wide">{{ $isAr ? 'ملاحظات المطابقة البصرية' : 'Visual match notes' }}</span>
+                    <p class="text-slate-200 mt-0.5 leading-relaxed">{{ $scenario['design_notes'] }}</p>
+                    @if(! empty($scenario['template']))
+                    <p class="text-slate-400 text-[10px] mt-1.5">{{ $scenario['template'] }} · {{ $scenario['subtitle_preset'] ?? '' }}</p>
                     @endif
                 </div>
                 @endif
@@ -372,6 +435,31 @@
                         @endif
                     </div>
 
+                    @if($activeReel && $activeReel->status === 'completed')
+                    <div class="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-2.5">
+                        <span class="text-[11px] font-bold text-slate-300">{{ $isAr ? 'نسخة أخرى بنقرة واحدة:' : 'One-click other format:' }}</span>
+                        @foreach(['1:1' => '1:1', '16:9' => '16:9', '9:16' => '9:16'] as $ratio => $ratioLabel)
+                            @if($activeReel->aspect_ratio !== $ratio)
+                                <form method="POST" action="{{ route('reels.export-aspect', $activeReel->id) }}">
+                                    @csrf
+                                    <input type="hidden" name="aspect_ratio" value="{{ $ratio }}">
+                                    <button type="submit" class="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[11px] font-black text-amber-300 transition hover:bg-slate-700" aria-label="{{ $isAr ? 'تصدير بمقاس '.$ratioLabel : 'Export in '.$ratioLabel }}">
+                                        <i class="fa-solid fa-crop-simple {{ $isAr ? 'ml-1' : 'mr-1' }}"></i>{{ $ratioLabel }}
+                                    </button>
+                                </form>
+                            @endif
+                        @endforeach
+                        <form method="POST" action="{{ route('reels.export-aspect', $activeReel->id) }}">
+                            @csrf
+                            <input type="hidden" name="aspect_ratio" value="all">
+                            <button type="submit" class="rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1.5 text-[11px] font-black text-amber-200 transition hover:bg-amber-500/25" aria-label="{{ $isAr ? 'تصدير كل المقاسات' : 'Export every aspect ratio' }}">
+                                <i class="fa-solid fa-layer-group {{ $isAr ? 'ml-1' : 'mr-1' }}"></i>{{ $isAr ? 'كل المقاسات' : 'All formats' }}
+                            </button>
+                        </form>
+                        <span class="text-[10px] text-slate-500">{{ $isAr ? 'يعيد استخدام نفس النص والتوقيت.' : 'Reuses the same text and timing.' }}</span>
+                    </div>
+                    @endif
+
                     @if($activeReel)
                     <div class="mb-4 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
                         @if($activeReel->content_source)
@@ -502,7 +590,32 @@
                             <span id="renderStage">{{ $stageLabels[$activeReel->progress_stage ?: 'queued'] ?? ($activeReel->progress_stage ?: 'queued') }}</span>
                             <span id="renderPercent">{{ (int) ($activeReel->progress ?? 0) }}%</span>
                         </div>
-                        <p class="text-[11px] text-slate-400">{{ $activeReel->status === 'cancellation_requested' ? ($isAr ? 'جارٍ إيقاف العملية بأمان…' : 'Stopping the process safely…') : ($isAr ? 'يتم الرندر في الخلفية؛ ستتحدّث هذه الصفحة تلقائياً عند الانتهاء.' : 'Rendering runs in the background; this page will update automatically when it finishes.') }}</p>
+                        <p id="renderStateMessage" role="status" aria-live="polite" class="text-[11px] text-slate-300">
+                            @if($activeReel->status === 'queued')
+                                {{ __('studio.render_status.queued', [], $lang) }}
+                            @elseif($activeReel->status === 'cancellation_requested')
+                                {{ __('studio.render_status.cancellation_requested', [], $lang) }}
+                            @else
+                                {{ __('studio.render_status.processing', [], $lang) }}
+                            @endif
+                        </p>
+                        <div id="renderQueueWait" class="flex items-center justify-between gap-3 text-[11px] text-slate-400 {{ $activeReel->status === 'queued' ? '' : 'hidden' }}">
+                            <span>{{ __('studio.render_status.waiting_time', [], $lang) }}</span>
+                            <time id="renderWaitElapsed" data-queued-seconds="{{ $queueWaitSeconds }}">{{ $queueWaitText }}</time>
+                        </div>
+                        <p id="renderLastUpdated" class="text-[10px] text-slate-500">
+                            {{ __('studio.render_status.last_updated', [], $lang) }}:
+                            <time id="renderLastUpdatedTime" datetime="{{ $activeReel->updated_at?->toIso8601String() ?? now()->toIso8601String() }}">{{ $activeReel->updated_at?->format('H:i:s') ?? __('studio.render_status.just_updated', [], $lang) }}</time>
+                        </p>
+                        <p id="renderStalledNotice" role="alert" class="hidden rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+                            {{ __('studio.render_status.stalled', [], $lang) }}
+                        </p>
+                        <p id="queueDelayNotice" aria-hidden="{{ $queueWaitSeconds >= 120 ? 'false' : 'true' }}" role="note" class="rounded-lg border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-100 {{ $queueWaitSeconds >= 120 ? '' : 'hidden' }}">
+                            {{ __('studio.render_status.queue_delay', [], $lang) }}
+                        </p>
+                        <p id="renderPollingError" role="alert" class="hidden text-[11px] text-rose-300">
+                            {{ __('studio.render_status.refresh_failed', [], $lang) }}
+                        </p>
                     </div>
                     @elseif($activeReel && $activeReel->status === 'cancelled')
                     <div class="rounded-2xl bg-slate-900/60 border border-slate-700 p-6 space-y-3">
@@ -530,8 +643,8 @@
                                 </button>
                             </form>
                         </div>
-                        @if($activeReel->error_message)
-                        <pre class="text-[10px] text-rose-200/80 whitespace-pre-wrap break-all max-h-40 overflow-auto bg-black/40 p-3 rounded-lg">{{ Str::limit($activeReel->error_message, 1000) }}</pre>
+                        @if($activeErrorMessage)
+                        <pre class="text-[10px] text-rose-200/80 whitespace-pre-wrap break-all max-h-40 overflow-auto bg-black/40 p-3 rounded-lg">{{ Str::limit($activeErrorMessage, 1000) }}</pre>
                         @endif
                         <a href="{{ route('reels.wizard', ['lang' => $lang]) }}" class="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-xs font-black text-slate-950 transition hover:bg-amber-400">
                             <i class="fa-solid fa-rotate-right"></i>
@@ -583,6 +696,7 @@
 
                     <div class="space-y-2 max-h-80 overflow-y-auto pr-1">
                         @foreach($reels as $r)
+                        @php($reelErrorMessage = $resolveErrorMessage($r->error_message, $r->language))
                         <div class="p-3 rounded-xl bg-slate-900 border {{ ($activeReel && $activeReel->id == $r->id) ? 'border-amber-500 bg-amber-500/5' : 'border-slate-800 hover:border-slate-700' }} flex items-center gap-3 transition group">
                             <!-- Thumbnail + status dot -->
                             <div class="relative h-12 w-9 flex-shrink-0">
@@ -594,7 +708,7 @@
                                 <span class="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-slate-900 {{ $r->status === 'completed' ? 'bg-emerald-400' : ($r->status === 'processing' ? 'bg-amber-400 animate-pulse' : 'bg-rose-400') }}"></span>
                             </div>
 
-                            <div class="truncate flex-1 min-w-0" @if($r->error_message) title="{{ $r->error_message }}" @endif>
+                            <div class="truncate flex-1 min-w-0" @if($reelErrorMessage) title="{{ $reelErrorMessage }}" @endif>
                                 <a href="{{ route('reels.index', ['active' => $r->id]) }}" class="text-xs font-bold text-white hover:text-amber-400 block truncate">
                                     {{ $r->title }}
                                 </a>
@@ -645,7 +759,7 @@
                                 <span class="text-[9px] bg-amber-500/20 text-amber-400 font-bold px-1.5 py-0.5 rounded border border-amber-500/30">{{ $isAr ? 'جديد' : 'NEW' }}</span>
                             </h3>
                             <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                                {{ $isAr ? 'اكتب فكرتك بشكل عادي وسنحوّلها عبر Gemini إلى سكربت كامل (هوك + ٣ مشاهد + كابشن وهاشتاغ) ونجعل الفيديو في قائمة الرندر تلقائياً.' : 'Write your plain idea and Gemini turns it into a full script (hook + 3 scenes + caption with hashtags), then queues the render automatically.' }}
+                                {{ $isAr ? 'اكتب فكرتك وسنحوّلها عبر Gemini إلى سكربت بمشاهد متتابعة متناسبة مع المدة (60 ثانية افتراضياً)، ثم نبدأ الرندر تلقائياً.' : 'Write your idea and Gemini turns it into paced scenes for your selected duration (60 seconds by default), then queues the render.' }}
                             </p>
                         </div>
                     </div>
@@ -666,18 +780,18 @@
                             <div>
                                 <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'القالب' : 'Template' }}</label>
                                 <select name="template" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
-                                    <option value="bold_stripe" selected>⚡ Bold Stripe</option>
+                                    <option value="cinematic" selected>🎬 Cinematic</option>
+                                    <option value="bold_stripe">⚡ Bold Stripe</option>
                                     <option value="classic">⭐ Classic</option>
                                     <option value="clean_news">📰 Clean News</option>
-                                    <option value="cinematic">🎬 Cinematic</option>
                                     <option value="quote_card">❝ Quote Card</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'المدة' : 'Duration' }}</label>
                                 <select name="duration" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
-                                    @foreach([5, 10, 15, 20, 30] as $scenarioDuration)
-                                    <option value="{{ $scenarioDuration }}" @selected($scenarioDuration === 10)>{{ $scenarioDuration }}s</option>
+                                    @foreach([5, 10, 15, 20, 30, 40, 60] as $scenarioDuration)
+                                    <option value="{{ $scenarioDuration }}" @selected((int) old('duration', 60) === $scenarioDuration)>{{ $scenarioDuration }}s</option>
                                     @endforeach
                                 </select>
                             </div>
@@ -705,6 +819,155 @@
                                     @endforeach
                                 </select>
                             </label>
+                            <label class="flex-1 min-w-[150px]">
+                                <span class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'خط النص' : 'Text font' }}</span>
+                                <select name="font_family" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    @foreach (config('studio.engine.arabic_fonts', []) as $fontKey => $fontFile)
+                                    <option value="{{ $fontKey }}" @selected(old('font_family', 'Tajawal') === $fontKey)>{{ $fontKey }}</option>
+                                    @endforeach
+                                </select>
+                            </label>
+                            <label class="flex-1 min-w-[150px]">
+                                <span class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'تأثير النص' : 'Text effect' }}</span>
+                                <select name="text_effect" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    <option value="none" @selected(old('text_effect') === 'none')>{{ $isAr ? 'بدون' : 'None' }}</option>
+                                    <option value="fade_in" @selected(old('text_effect') === 'fade_in')>{{ $isAr ? 'ظهور تدريجي' : 'Fade in' }}</option>
+                                    <option value="slide_up" @selected(old('text_effect', 'slide_up') === 'slide_up')>{{ $isAr ? 'انزلاق للأعلى' : 'Slide up' }}</option>
+                                    <option value="pop_up" @selected(old('text_effect') === 'pop_up')>{{ $isAr ? 'تكبير متحرك' : 'Pop up' }}</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="grid gap-3 rounded-xl border border-amber-500/20 bg-slate-950/40 p-3 sm:grid-cols-2">
+                            <label class="flex items-start gap-2 text-[11px] text-slate-200">
+                                <input type="checkbox" name="voiceover_enabled" value="1" @checked(old('voiceover_enabled', false)) class="mt-0.5 h-4 w-4 accent-amber-500">
+                                <span><strong class="block text-white">{{ $isAr ? 'تعليق صوتي من ElevenLabs' : 'ElevenLabs voiceover' }}</strong><span class="text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'نبرة دافئة؛ يتطلب مفتاحاً نشطاً وVoice ID للغة المختارة.' : 'Warm tone; requires an active key and a Voice ID for the selected language.' }}</span></span>
+                            </label>
+                            <label class="flex items-start gap-2 text-[11px] text-slate-200">
+                                <input type="checkbox" name="sound_effects_enabled" value="1" @checked(old('sound_effects_enabled', true)) class="mt-0.5 h-4 w-4 accent-amber-500">
+                                <span><strong class="block text-white">{{ $isAr ? 'مؤثرات انتقال هادئة' : 'Subtle transition effects' }}</strong><span class="text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'مؤثرات قصيرة منخفضة الصوت مع ظهور المشاهد، تُنشأ محلياً.' : 'Short, low-volume scene cues generated locally.' }}</span></span>
+                            </label>
+                            <label class="sm:col-span-2">
+                                <span class="mb-1 block text-[10px] font-bold text-slate-400">{{ $isAr ? 'نبرة التعليق' : 'Voiceover tone' }}</span>
+                                <select id="voiceoverTone" name="voiceover_tone" class="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-[11px] text-white">
+                                    <option value="neutral" @selected(old('voiceover_tone') === 'neutral')>{{ $isAr ? 'طبيعية وواضحة' : 'Neutral and clear' }}</option>
+                                    <option value="calm" @selected(old('voiceover_tone') === 'calm')>{{ $isAr ? 'هادئة' : 'Calm' }}</option>
+                                    <option value="warm" @selected(old('voiceover_tone', $voiceProfile['voiceover_tone'] ?? 'warm') === 'warm')>{{ $isAr ? 'دافئة وواثقة' : 'Warm and confident' }}</option>
+                                    <option value="energetic" @selected(old('voiceover_tone') === 'energetic')>{{ $isAr ? 'حيوية' : 'Energetic' }}</option>
+                                </select>
+                            </label>
+                            @if (! empty($voices))
+                            <label class="sm:col-span-2">
+                                <span class="mb-1 block text-[10px] font-bold text-slate-400">{{ $isAr ? 'الصوت (ElevenLabs)' : 'Voice (ElevenLabs)' }}</span>
+                                <select id="voicePicker" name="voice_id" class="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-[11px] text-white">
+                                    <option value="" @selected(old('voice_id', $voiceProfile['voice_id'] ?? '') === '')>{{ $isAr ? 'تلقائي — الصوت المضبوط للغة الفيديو' : 'Auto — configured voice for the video language' }}</option>
+                                    @foreach (collect($voices)->sortBy(fn ($voice) => match ($voice['language'] ?? null) { 'ar' => 0, 'en' => 1, default => 2 }) as $voice)
+                                        <option value="{{ $voice['id'] }}" data-preview="{{ $voice['preview_url'] ?? '' }}" @selected(old('voice_id', $voiceProfile['voice_id'] ?? '') === $voice['id'])>{{ $voice['name'] }} — {{ $voice['language'] === 'ar' ? ($isAr ? 'عربي' : 'Arabic') : ($voice['language'] === 'en' ? ($isAr ? 'إنجليزي' : 'English') : ($voice['labels']['accent'] ?? ($isAr ? 'متعدد اللغات' : 'Multilingual'))) }}</option>
+                                    @endforeach
+                                </select>
+                                <audio id="voicePreviewPlayer" class="mt-2 hidden w-full" controls preload="none" aria-label="{{ $isAr ? 'معاينة الصوت' : 'Voice preview' }}"></audio>
+                                @if ($errors->has('voice_id'))
+                                    <span class="mt-1 block text-[10px] text-rose-300" role="alert">{{ $errors->first('voice_id') }}</span>
+                                @endif
+                            </label>
+                            <div class="sm:col-span-2">
+                                <label class="flex items-center gap-2 text-[11px] font-bold text-slate-300">
+                                    <input type="checkbox" id="voiceTuneToggle" class="h-4 w-4 accent-amber-500" @checked(old('voice_stability', $voiceProfile['voice_stability'] ?? null) !== null)>
+                                    <span>{{ $isAr ? 'تحكم متقدم في الصوت' : 'Advanced voice control' }}</span>
+                                </label>
+                                <div class="mt-2 grid grid-cols-2 gap-3 {{ old('voice_stability', $voiceProfile['voice_stability'] ?? null) !== null ? '' : 'opacity-50' }}" id="voiceTuneFields">
+                                    <label class="block">
+                                        <span class="mb-1 flex items-center justify-between text-[10px] font-bold text-slate-400"><span>{{ $isAr ? 'الاستقرار' : 'Stability' }}</span><output data-voice-output="voice_stability">{{ old('voice_stability', $voiceProfile['voice_stability'] ?? '0.52') }}</output></span>
+                                        <input type="range" name="voice_stability" min="0" max="1" step="0.01" value="{{ old('voice_stability', $voiceProfile['voice_stability'] ?? '0.52') }}" class="w-full accent-amber-500" data-voice-tune @disabled(old('voice_stability', $voiceProfile['voice_stability'] ?? null) === null)>
+                                    </label>
+                                    <label class="block">
+                                        <span class="mb-1 flex items-center justify-between text-[10px] font-bold text-slate-400"><span>{{ $isAr ? 'التشابه بالصوت' : 'Similarity' }}</span><output data-voice-output="voice_similarity">{{ old('voice_similarity', $voiceProfile['voice_similarity'] ?? '0.78') }}</output></span>
+                                        <input type="range" name="voice_similarity" min="0" max="1" step="0.01" value="{{ old('voice_similarity', $voiceProfile['voice_similarity'] ?? '0.78') }}" class="w-full accent-amber-500" data-voice-tune @disabled(old('voice_stability', $voiceProfile['voice_stability'] ?? null) === null)>
+                                    </label>
+                                    <label class="block">
+                                        <span class="mb-1 flex items-center justify-between text-[10px] font-bold text-slate-400"><span>{{ $isAr ? 'الأسلوب' : 'Style' }}</span><output data-voice-output="voice_style">{{ old('voice_style', $voiceProfile['voice_style'] ?? '0.14') }}</output></span>
+                                        <input type="range" name="voice_style" min="0" max="1" step="0.01" value="{{ old('voice_style', $voiceProfile['voice_style'] ?? '0.14') }}" class="w-full accent-amber-500" data-voice-tune @disabled(old('voice_stability', $voiceProfile['voice_stability'] ?? null) === null)>
+                                    </label>
+                                    <label class="block">
+                                        <span class="mb-1 flex items-center justify-between text-[10px] font-bold text-slate-400"><span>{{ $isAr ? 'السرعة' : 'Speed' }}</span><output data-voice-output="voice_speed">{{ old('voice_speed', $voiceProfile['voice_speed'] ?? '1') }}</output></span>
+                                        <input type="range" name="voice_speed" min="0.7" max="1.2" step="0.05" value="{{ old('voice_speed', $voiceProfile['voice_speed'] ?? '1') }}" class="w-full accent-amber-500" data-voice-tune @disabled(old('voice_stability', $voiceProfile['voice_stability'] ?? null) === null)>
+                                    </label>
+                                </div>
+                                <label class="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
+                                    <input type="hidden" name="voice_boost" value="0" data-voice-tune @disabled(old('voice_stability', $voiceProfile['voice_stability'] ?? null) === null)>
+                                    <input type="checkbox" name="voice_boost" value="1" class="h-4 w-4 accent-amber-500" data-voice-tune @checked(old('voice_boost', $voiceProfile['voice_boost'] ?? '1') === '1') @disabled(old('voice_stability', $voiceProfile['voice_stability'] ?? null) === null)>
+                                    <span>{{ $isAr ? 'تعزيز وضوح المتحدث (Speaker boost)' : 'Speaker boost' }}</span>
+                                </label>
+                                <div class="mt-2 flex items-center gap-2">
+                                    <button type="button" onclick="saveVoiceProfile()" class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[10px] font-bold text-amber-300 transition hover:bg-amber-500/20">
+                                        {{ $isAr ? 'احفظ إعدادات الصوت' : 'Save voice settings' }}
+                                    </button>
+                                    <span id="voiceProfileStatus" role="status" aria-live="polite" class="text-[10px] text-emerald-300"></span>
+                                </div>
+                            </div>
+                            <script>
+                                (function () {
+                                    const picker = document.getElementById('voicePicker');
+                                    const player = document.getElementById('voicePreviewPlayer');
+                                    picker?.addEventListener('change', function () {
+                                        const preview = picker.selectedOptions[0]?.dataset.preview || '';
+                                        if (!preview) {
+                                            player?.pause();
+                                            player?.removeAttribute('src');
+                                            player?.classList.add('hidden');
+                                            return;
+                                        }
+                                        if (!player) return;
+                                        player.src = preview;
+                                        player.classList.remove('hidden');
+                                        player.play().catch(function () {});
+                                    });
+
+                                    const toggle = document.getElementById('voiceTuneToggle');
+                                    const fields = document.getElementById('voiceTuneFields');
+                                    const tuned = document.querySelectorAll('[data-voice-tune]');
+                                    toggle?.addEventListener('change', function () {
+                                        tuned.forEach(function (element) {
+                                            element.disabled = !toggle.checked;
+                                        });
+                                        fields?.classList.toggle('opacity-50', !toggle.checked);
+                                    });
+
+                                    document.querySelectorAll('[data-voice-output]').forEach(function (output) {
+                                        const input = document.querySelector('input[name="' + output.dataset.voiceOutput + '"]');
+                                        input?.addEventListener('input', function () {
+                                            output.textContent = input.value;
+                                        });
+                                    });
+                                })();
+
+                                window.saveVoiceProfile = async function () {
+                                    const status = document.getElementById('voiceProfileStatus');
+                                    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                                    const value = function (selector) {
+                                        return document.querySelector(selector)?.value || '';
+                                    };
+                                    const payload = new FormData();
+                                    payload.append('voice_id', value('#voicePicker'));
+                                    payload.append('voiceover_tone', value('#voiceoverTone'));
+                                    document.querySelectorAll('input[data-voice-tune]').forEach(function (input) {
+                                        if (input.disabled || (input.type === 'checkbox' && !input.checked)) return;
+                                        payload.append(input.name, input.value);
+                                    });
+
+                                    try {
+                                        const response = await fetch(@json(route('reels.profile.voice')), {
+                                            method: 'POST',
+                                            headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+                                            body: payload,
+                                        });
+                                        if (!response.ok) throw new Error();
+                                        if (status) status.textContent = @json($isAr ? 'حُفظت إعدادات الصوت.' : 'Voice settings saved.');
+                                    } catch (error) {
+                                        if (status) status.textContent = @json($isAr ? 'تعذّر حفظ الإعدادات.' : 'Could not save voice settings.');
+                                    }
+                                };
+                            </script>
+                            @endif
                         </div>
                         <button type="submit" id="scenarioSubmitBtn"
                             class="w-full py-3.5 rounded-xl font-black bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 hover:from-amber-400 hover:to-amber-500 transition shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 text-sm">
@@ -714,6 +977,91 @@
                         <p class="text-[10px] text-slate-500 text-center">
                             {{ $isAr ? 'يتطلب مفتاح Gemini مفعّلاً: يُولّد السيناريو أولًا ليعرضه فوق الصفحة، ثم توضع المعالجة في الطابور تلقائياً.' : 'Requires an active Gemini key: the script is generated and shown above the page first, then the render is queued automatically.' }}
                         </p>
+                    </form>
+                </div>
+
+                <!-- CLONE A REFERENCE FRAME -->
+                <div id="cloneCard" class="studio-card rounded-3xl p-6 border border-sky-500/30 mb-5 relative overflow-hidden">
+                    <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-500 via-indigo-500 to-sky-500"></div>
+                    <div class="flex items-start gap-3 mb-4">
+                        <div class="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center shrink-0">
+                            <i class="fa-solid fa-image text-sky-400"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <h3 class="text-base font-black text-white flex items-center gap-2">
+                                {{ $isAr ? 'فيديو مشابه للقطة مرجعية' : 'Recreate a reference frame' }}
+                                <span class="text-[9px] bg-sky-500/20 text-sky-400 font-bold px-1.5 py-0.5 rounded border border-sky-500/30">{{ $isAr ? 'جديد' : 'NEW' }}</span>
+                            </h3>
+                            <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                                {{ $isAr ? 'ارفع لقطة من فيديو أعجبك، وسنحلّل الفكرة والتصميم ثم ننتج فيلماً قصيراً بنفس الأسلوب والألوان والخطوط.' : 'Upload a screenshot from a reel you like. We analyse its idea and design, then render a new reel with the same look, colours and typography.' }}
+                            </p>
+                        </div>
+                    </div>
+                    <form action="{{ route('reels.clone') }}" method="POST" enctype="multipart/form-data" id="cloneForm" class="space-y-3">
+                        @csrf
+                        <div class="flex items-center gap-3 rounded-xl border border-sky-500/25 bg-slate-950/40 p-3">
+                            <div class="w-16 h-24 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 flex items-center justify-center shrink-0">
+                                <img id="clonePreview" alt="{{ $isAr ? 'معاينة اللقطة' : 'Reference preview' }}" class="hidden w-full h-full object-cover">
+                                <i id="clonePreviewIcon" class="fa-regular fa-image text-slate-600"></i>
+                            </div>
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold text-white">{{ $isAr ? 'لقطة المرجع (JPG أو PNG أو WebP)' : 'Reference screenshot (JPG, PNG, WebP)' }}</p>
+                                <p class="text-[10px] text-slate-400 mb-2">{{ $isAr ? 'لقطة واحدة كاملة الإطار تُظهر النص والخلفية — حتى 8MB.' : 'One full-frame shot that shows the text and background — up to 8MB.' }}</p>
+                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 text-[11px] font-bold cursor-pointer hover:bg-sky-500/25 transition">
+                                    <i class="fa-solid fa-upload"></i>
+                                    {{ $isAr ? 'اختر صورة' : 'Choose image' }}
+                                    <input type="file" id="cloneImageInput" name="reference_image" accept="image/jpeg,image/png,image/webp" required class="hidden">
+                                </label>
+                            </div>
+                        </div>
+                        <textarea name="idea" rows="2" maxlength="1000" placeholder="{{ $isAr ? 'توجيه اختياري: فكرة جديدة بنفس الأسلوب، أو جمهور مختلف — مثال: نفس التصميم لكن لموضوع توفير المال.' : 'Optional direction: a new idea in the same style, or a different audience — e.g. same design but about saving money.' }}"
+                            class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 text-sm"></textarea>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'اللغة' : 'Language' }}</label>
+                                <select name="language" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    <option value="ar">{{ $isAr ? '🇸🇦 عربي' : '🇸🇦 Arabic' }}</option>
+                                    <option value="en">{{ $isAr ? '🌍 إنجليزي' : '🌍 English' }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'المدة' : 'Duration' }}</label>
+                                <select name="duration" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    @foreach([10, 20, 30, 45, 60] as $cloneDuration)
+                                    <option value="{{ $cloneDuration }}" @selected($cloneDuration === 30)>{{ $cloneDuration }}s</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'مقبض البروفايل' : 'Page handle' }}</label>
+                                <input type="text" name="handle" maxlength="100" placeholder="{{ $isAr ? '@حسابك' : '@yourpage' }}"
+                                    class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-[11px]">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-400 mb-1">{{ $isAr ? 'الخلفية عند إيقاف اللقطة' : 'Background (when not using the shot)' }}</label>
+                                <select name="bg_preset" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    @foreach($backgrounds as $background)
+                                    <option value="{{ $background['id'] }}" @selected($loop->first)>{{ $background['name'][$isAr ? 'ar' : 'en'] }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid gap-2 rounded-xl border border-sky-500/20 bg-slate-950/40 p-3 sm:grid-cols-2">
+                            <label class="flex items-start gap-2 text-[11px] text-slate-200">
+                                <input type="hidden" name="use_reference_background" value="0">
+                                <input type="checkbox" name="use_reference_background" value="1" checked class="mt-0.5 h-4 w-4 accent-sky-500">
+                                <span><strong class="block text-white">{{ $isAr ? 'استخدم اللقطة كخلفية' : 'Use the screenshot as footage' }}</strong><span class="text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'يحرّك الإطار ببطء خلف النص الجديد. أوقفه لاستخدام خلفية متحركة.' : 'Slowly animates the frame behind the new text. Turn off to use a motion background instead.' }}</span></span>
+                            </label>
+                            <label class="flex items-start gap-2 text-[11px] text-slate-200">
+                                <input type="checkbox" name="sound_effects_enabled" value="1" checked class="mt-0.5 h-4 w-4 accent-sky-500">
+                                <span><strong class="block text-white">{{ $isAr ? 'مؤثرات صوتية للمشاهد' : 'Scene sound cues' }}</strong><span class="text-[10px] leading-relaxed text-slate-400">{{ $isAr ? 'نغمات قصيرة محلية تُولّد أثناء الرندر.' : 'Short local cues generated during the render.' }}</span></span>
+                            </label>
+                        </div>
+                        <button type="submit" id="cloneSubmitBtn"
+                            class="w-full py-3.5 rounded-xl font-black bg-gradient-to-r from-sky-500 to-indigo-500 text-white hover:from-sky-400 hover:to-indigo-400 transition shadow-lg shadow-sky-500/25 flex items-center justify-center gap-2 text-sm">
+                            <i class="fa-solid fa-clone"></i>
+                            <span id="cloneSubmitLabel" data-pending-text="{{ $isAr ? 'جارٍ تحليل اللقطة وتوليد السيناريو...' : 'Analysing the frame and writing the script...' }}">{{ $isAr ? 'حلّل اللقطة وأنتج فيديو مشابهاً' : 'Analyse & render a matching reel' }}</span>
+                        </button>
                     </form>
                 </div>
 
@@ -802,7 +1150,7 @@
                         </div>
 
                         <!-- Language, Duration, Motion -->
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
                             <div>
                                 <label class="block text-xs font-bold text-slate-300 mb-2">{{ $isAr ? 'اللغة' : 'Language' }}</label>
                                 <select name="language" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
@@ -814,17 +1162,34 @@
                                 <label class="block text-xs font-bold text-slate-300 mb-2">{{ $isAr ? 'المدة' : 'Duration' }}</label>
                                 <select name="duration" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
                                     <option value="5">5 {{ $isAr ? 'ث' : 's' }}</option>
-                                    <option value="10" selected>10 {{ $isAr ? 'ث' : 's' }}</option>
+                                    <option value="10">10 {{ $isAr ? 'ث' : 's' }}</option>
                                     <option value="20">20 {{ $isAr ? 'ث' : 's' }}</option>
                                     <option value="30">30 {{ $isAr ? 'ث' : 's' }}</option>
+                                    <option value="40">40 {{ $isAr ? 'ث' : 's' }}</option>
+                                    <option value="60" selected>60 {{ $isAr ? 'ث' : 's' }}</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-xs font-bold text-slate-300 mb-2">{{ $isAr ? 'حركة الكاميرا' : 'Camera' }}</label>
                                 <select name="camera_motion" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
                                     <option value="zoom_in">🔍 {{ $isAr ? 'تقريب هادئ' : 'Gentle zoom' }}</option>
+                                    <option value="zoom_out">{{ $isAr ? 'تبعيد هادئ' : 'Gentle reveal' }}</option>
                                     <option value="pan">↔️ Pan</option>
+                                    <option value="drift">{{ $isAr ? 'انحراف قطري' : 'Diagonal drift' }}</option>
+                                    <option value="tilt_up">{{ $isAr ? 'رفع عمودي' : 'Tilt up' }}</option>
+                                    <option value="handheld">{{ $isAr ? 'اهتزاز خفيف' : 'Handheld' }}</option>
                                     <option value="static">{{ $isAr ? 'ثابت' : 'Static' }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-300 mb-2">{{ $isAr ? 'التدرّج اللوني' : 'Color grade' }}</label>
+                                <select name="color_grade" class="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs">
+                                    <option value="none">{{ $isAr ? 'بدون' : 'None' }}</option>
+                                    <option value="cinematic" selected>{{ $isAr ? 'سينمائي' : 'Cinematic' }}</option>
+                                    <option value="warm">{{ $isAr ? 'دافئ' : 'Warm' }}</option>
+                                    <option value="cool">{{ $isAr ? 'بارد' : 'Cool' }}</option>
+                                    <option value="vivid">{{ $isAr ? 'حيوي' : 'Vivid' }}</option>
+                                    <option value="mono">{{ $isAr ? 'أبيض وأسود' : 'Mono' }}</option>
                                 </select>
                             </div>
                             <div>
@@ -890,12 +1255,35 @@
                                 <i class="fa-solid fa-music text-pink-400 mr-1"></i>
                                 {{ $isAr ? 'موسيقى الخلفية (اختياري - MP3)' : 'Background Music (Optional MP3)' }}
                             </label>
+                            @if (!empty($musicTracks))
+                                <select name="music_track" class="w-full mb-2 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-[11px]">
+                                    <option value="">{{ $isAr ? 'تلقائي — موسيقى مولّدة حسب المزاج' : 'Auto — generated music by mood' }}</option>
+                                    @foreach ($musicTracks as $track)
+                                        <option value="{{ $track['path'] }}" @selected(old('music_track') === $track['path'])>{{ $track['label'] }}</option>
+                                    @endforeach
+                                </select>
+                                <p class="text-[10px] text-slate-400 mb-2">{{ $isAr ? 'اختر مقطعاً من المكتبة أو ارفع ملفاً خاصاً بك (الرفع له الأولوية).' : 'Pick a library track or upload your own file (the upload wins).' }}</p>
+                            @endif
                             <div class="border-2 border-dashed border-slate-700 rounded-xl p-4 text-center hover:border-pink-500/50 transition cursor-pointer" onclick="document.getElementById('musicUpload').click()">
                                 <i class="fa-solid fa-music text-slate-400 text-lg mb-1"></i>
                                 <p class="text-xs text-slate-400">{{ $isAr ? 'ارفع MP3 أو WAV أو M4A تملك حق استخدامه' : 'Upload MP3, WAV, or M4A audio you have rights to use' }}</p>
                                 <input type="file" id="musicUpload" name="music" accept="audio/mpeg,audio/wav,audio/mp4,.mp3,.wav,.m4a" class="hidden" onchange="showFileNames(this, 'musicName')">
                             </div>
                             <div id="musicName" class="text-[11px] text-pink-400 mt-1 hidden"></div>
+                        </div>
+
+                        <!-- Brand Logo -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-300 mb-2">
+                                <i class="fa-solid fa-certificate text-emerald-400 mr-1"></i>
+                                {{ $isAr ? 'لوجو القناة على الفيديو (اختياري PNG)' : 'Channel logo overlay (optional PNG)' }}
+                            </label>
+                            <div class="border-2 border-dashed border-slate-700 rounded-xl p-4 text-center hover:border-emerald-500/50 transition cursor-pointer" onclick="document.getElementById('logoUpload').click()">
+                                <i class="fa-solid fa-image text-slate-400 text-lg mb-1"></i>
+                                <p class="text-xs text-slate-400">{{ $isAr ? 'PNG بخلفية شفافة يُعرض أعلى يمين الفيديو' : 'Transparent PNG shown in the top-right corner' }}</p>
+                                <input type="file" id="logoUpload" name="logo" accept="image/png,image/jpeg,image/webp" class="hidden" onchange="showFileNames(this, 'logoName')">
+                            </div>
+                            <div id="logoName" class="text-[11px] text-emerald-400 mt-1 hidden"></div>
                         </div>
 
                         <!-- AI Keys (optional, multiple) -->
@@ -1218,6 +1606,50 @@
             });
         }
 
+        const cloneForm = document.getElementById('cloneForm');
+        if (cloneForm) {
+            const cloneInput = document.getElementById('cloneImageInput');
+            const clonePreview = document.getElementById('clonePreview');
+            const clonePreviewIcon = document.getElementById('clonePreviewIcon');
+            const cloneSubmit = document.getElementById('cloneSubmitBtn');
+            const cloneLabel = document.getElementById('cloneSubmitLabel');
+            let clonePreviewUrl = null;
+
+            cloneInput?.addEventListener('change', function() {
+                const file = this.files && this.files[0];
+                if (clonePreviewUrl) {
+                    URL.revokeObjectURL(clonePreviewUrl);
+                    clonePreviewUrl = null;
+                }
+                if (!file) {
+                    clonePreview?.classList.add('hidden');
+                    clonePreviewIcon?.classList.remove('hidden');
+                    return;
+                }
+                clonePreviewUrl = URL.createObjectURL(file);
+                if (clonePreview) {
+                    clonePreview.src = clonePreviewUrl;
+                    clonePreview.classList.remove('hidden');
+                }
+                clonePreviewIcon?.classList.add('hidden');
+            });
+
+            cloneForm.addEventListener('submit', function(event) {
+                if (cloneForm.dataset.submitting === 'true') {
+                    event.preventDefault();
+                    return;
+                }
+                cloneForm.dataset.submitting = 'true';
+                cloneSubmit.disabled = true;
+                cloneSubmit.setAttribute('aria-busy', 'true');
+                cloneSubmit.classList.add('opacity-60', 'cursor-not-allowed');
+                if (cloneLabel) {
+                    cloneLabel.dataset.defaultText = cloneLabel.textContent;
+                    cloneLabel.textContent = cloneLabel.dataset.pendingText || cloneLabel.textContent;
+                }
+            });
+        }
+
         document.querySelectorAll('[data-example-filter]').forEach(filterButton => {
             filterButton.addEventListener('click', function() {
                 const selectedCategory = this.dataset.exampleFilter || 'all';
@@ -1296,7 +1728,7 @@
         }
 
         document.querySelectorAll('[data-background-picker]').forEach(picker => {
-            const presetSelect = document.querySelector('select[name="bg_preset"]');
+            const presetSelect = picker.closest('form')?.querySelector('select[name="bg_preset"]');
             const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
             picker.querySelectorAll('input[name="bg_preset"]').forEach(radio => {
@@ -1347,27 +1779,74 @@
         });
 
         // Poll a queued/processing render and refresh the page when it settles.
-        const pendingReel = @json($isProcessing ? ['url' => route('reels.status', $activeReel)] : null);
+        const pendingReel = @json($pendingReel);
         if (pendingReel) {
             const stageLabels = @json($stageLabels);
+            const renderMessages = @json($renderMessages);
+            const locale = @json($lang);
+            const pollStartedAt = performance.now();
+            const queueDelayThresholdSeconds = 120;
+            const waitDetails = document.getElementById('renderQueueWait');
+            const waitElapsed = document.getElementById('renderWaitElapsed');
+            const delayNotice = document.getElementById('queueDelayNotice');
+            const stateMessage = document.getElementById('renderStateMessage');
+            const statusTitle = document.getElementById('renderStatusTitle');
+            const lastUpdated = document.getElementById('renderLastUpdatedTime');
+            const stalledNotice = document.getElementById('renderStalledNotice');
+            const pollingError = document.getElementById('renderPollingError');
+
+            const updateQueuedWait = (status) => {
+                const isQueued = status === 'queued';
+                const elapsedSeconds = pendingReel.queuedSeconds + Math.floor((performance.now() - pollStartedAt) / 1000);
+                waitDetails?.classList.toggle('hidden', !isQueued);
+                if (isQueued && waitElapsed) {
+                    const minutes = Math.floor(elapsedSeconds / 60);
+                    const seconds = elapsedSeconds % 60;
+                    waitElapsed.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                }
+                const delayed = isQueued && elapsedSeconds >= queueDelayThresholdSeconds;
+                delayNotice?.classList.toggle('hidden', !delayed);
+                delayNotice?.setAttribute('aria-hidden', String(!delayed));
+            };
+
             const pollRender = async () => {
                 try {
                     const response = await fetch(pendingReel.url, { headers: { 'Accept': 'application/json' } });
-                    if (response.ok) {
-                        const data = await response.json();
-                        const bar = document.getElementById('renderProgressBar');
-                        const percent = document.getElementById('renderPercent');
-                        const stage = document.getElementById('renderStage');
-                        if (bar) bar.style.width = `${data.progress}%`;
-                        if (percent) percent.textContent = `${data.progress}%`;
-                        if (stage) stage.textContent = stageLabels[data.stage] || data.stage || '';
-                        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-                            window.location.reload();
-                            return;
-                        }
+                    if (!response.ok) {
+                        throw new Error(`Render status request failed (${response.status}).`);
+                    }
+                    const data = await response.json();
+                    const bar = document.getElementById('renderProgressBar');
+                    const percent = document.getElementById('renderPercent');
+                    const stage = document.getElementById('renderStage');
+                    if (bar) bar.style.width = `${data.progress}%`;
+                    if (percent) percent.textContent = `${data.progress}%`;
+                    if (stage) stage.textContent = stageLabels[data.stage] || data.stage || '';
+                    if (statusTitle) statusTitle.textContent = stageLabels[data.stage] || data.stage || '';
+                    if (stateMessage) {
+                        const messageKey = data.status === 'queued'
+                            ? 'queued'
+                            : data.status === 'cancellation_requested'
+                                ? 'cancellation_requested'
+                                : 'processing';
+                        stateMessage.textContent = renderMessages[messageKey];
+                    }
+                    updateQueuedWait(data.status);
+                    if (lastUpdated) {
+                        // Show the worker's real heartbeat time, never the
+                        // browser clock, so a dead worker cannot look healthy.
+                        const heartbeatAt = data.updated_at ? new Date(data.updated_at) : new Date();
+                        lastUpdated.textContent = heartbeatAt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        lastUpdated.dateTime = heartbeatAt.toISOString();
+                    }
+                    stalledNotice?.classList.toggle('hidden', data.stalled !== true);
+                    pollingError?.classList.add('hidden');
+                    if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                        window.location.reload();
+                        return;
                     }
                 } catch (error) {
-                    // Keep polling; a transient network error should not stop the UI.
+                    pollingError?.classList.remove('hidden');
                 }
                 setTimeout(pollRender, 2000);
             };

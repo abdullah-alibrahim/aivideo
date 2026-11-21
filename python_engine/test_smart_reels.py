@@ -1,6 +1,7 @@
 import unittest
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import numpy as np
@@ -415,12 +416,58 @@ class StoryboardTest(unittest.TestCase):
 
     def test_all_templates_and_the_end_card_render(self):
         base = {"headline": "Three simple steps", "emphasis": "", "point_1": "", "point_2": "", "point_3": ""}
-        for template in ("classic", "clean_news", "cinematic", "quote_card"):
+        for template in ("classic", "clean_news", "cinematic", "quote_card", "numbered_list"):
             clip = render_reference_card(base, size=(720, 1280), duration=1, template=template, handle="@page", language="en", progress=(1, 3), kicker="01 / 02")
             self.assertEqual(clip.size, (720, 1280))
 
         end_card = engine.render_end_card({"headline": "Save this for later"}, size=(720, 1280), duration=1, handle="@page", language="en", progress=(3, 3))
         self.assertEqual(end_card.size, (720, 1280))
+
+    def test_numbered_list_design_renders_a_high_contrast_index_badge(self):
+        for language, phrase in [
+            ("en", "Ask for an itemized statement."),
+            ("ar", "اطلب كشفاً مفصلاً بالفاتورة."),
+        ]:
+            with self.subTest(language=language):
+                clip = render_reference_card(
+                    {"headline": "Phrases for a billing call" if language == "en" else "عبارات لمكالمة الفاتورة"},
+                    size=(720, 1280),
+                    duration=1,
+                    template="numbered_list",
+                    language=language,
+                    include_branding=False,
+                    include_cta=False,
+                    accent_color="#FACC15",
+                    progress=(2, 4),
+                    point_number=2,
+                    numbered_points=[
+                        phrase,
+                        "Keep a copy of the receipt." if language == "en" else "احتفظ بنسخة عن الإيصال.",
+                        "Ask who can help." if language == "en" else "اسأل من يمكنه المساعدة.",
+                    ],
+                )
+
+                frame = np.asarray(clip.get_frame(0), dtype=np.uint8)
+                self.assertEqual(frame.shape[:2], (1280, 720))
+                self.assertGreater(np.all(frame[..., :3] == [250, 204, 21], axis=-1).sum(), 100)
+                card_column_x = 80 if language == "ar" else 640
+                card_column = np.all(frame[:, card_column_x, :3] == [250, 250, 248], axis=-1)
+                card_bands = np.count_nonzero(np.diff(np.r_[False, card_column, False].astype(np.int8)) == 1)
+                self.assertEqual(card_bands, 3)
+                clip.close()
+
+    def test_command_line_accepts_the_numbered_list_template(self):
+        script = Path(__file__).with_name("smart_reels.py")
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("numbered_list", result.stdout)
 
 
 class PreviewImageTest(unittest.TestCase):

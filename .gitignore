@@ -4,6 +4,7 @@
 !.env.example
 backups/
 .work/
+outputs/
 laravel-app/storage/app/input_videos/
 laravel-app/storage/app/bg_music/
 laravel-app/storage/app/public/reels/
